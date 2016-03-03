@@ -1,0 +1,4 @@
+[package]
+name = "nixrs"
+version = "0.1.0"
+authors = ["Scott Olson <scott@solson.me>"]
