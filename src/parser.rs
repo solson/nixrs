@@ -17,17 +17,22 @@ enum TokenKind {
     DollarBrace,    // ${
 
     // Operators
-    Bang,       // !
-    Star,       // *
+    Mult,       // *
     Minus,      // -
     Plus,       // +
     Divide,     // /
+    Less,       // <
+    Greater,    // >
+    LessEq,     // <=
+    GreaterEq,  // >=
     Assign,     // =
     Equals,     // ==
     NotEquals,  // !=
     And,        // &&
     Or,         // ||
     Implies,    // ->
+    Not,        // !
+    Update,     // //
     Concat,     // ++
 
     // Other syntax
