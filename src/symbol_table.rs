@@ -32,8 +32,8 @@ impl SymbolTable {
     }
 
     pub fn get_string(&self, sym: Symbol) -> &str {
-        // SAFE: We ensure all *const str in the Vec point into strings kept alive by the HashMap,
-        // and we never remove from the HashMap or mutate its key strings.
+        // SAFE: We ensure all *const str in the Vec point into strings kept alive by the HashMap
+        // and we never remove from the HashMap.
         unsafe {
             &*self.sym_to_str[sym.index as usize]
         }

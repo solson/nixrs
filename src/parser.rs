@@ -1,7 +1,22 @@
 use symbol_table::{Symbol, SymbolTable};
 
+#[derive(Clone, Debug)]
+pub struct Span {
+    file: String,
+    column: usize,
+    line: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct Spanned<T> {
+    pub val: T,
+    pub span: Span,
+}
+
+pub type Token = Spanned<TokenKind>;
+
 #[derive(Clone, Debug, PartialEq)]
-enum TokenKind {
+pub enum TokenKind {
     // Basic
     Id(Symbol),
     Int(i64),
@@ -51,4 +66,8 @@ enum TokenKind {
     BracketR,   // ]
     BraceL,     // {
     BraceR,     // }
+}
+
+pub fn lex(source: String) -> Vec<Token> {
+    vec![]
 }
