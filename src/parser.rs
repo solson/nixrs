@@ -2,7 +2,7 @@ use itertools::Itertools;
 use std::str::Chars;
 
 use context::EvalContext;
-use symbol_table::{Symbol, SymbolTable};
+use symbol_table::Symbol;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Pos {
@@ -89,7 +89,7 @@ pub struct Lexer<'ctx, 'src> {
 }
 
 impl<'ctx, 'src> Lexer<'ctx, 'src> {
-    fn new(ectx: &'ctx EvalContext, filename: &str, source: &'src str) -> Self {
+    pub fn new(ectx: &'ctx EvalContext, filename: &str, source: &'src str) -> Self {
         Lexer {
             ectx: ectx,
             source: source,

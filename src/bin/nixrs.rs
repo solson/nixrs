@@ -27,7 +27,9 @@ fn result_main() -> io::Result<()> {
     try!(try!(File::open(input_file)).read_to_string(&mut source));
 
     let ectx = EvalContext::new();
-    let tokens = parser::lex(&ectx, input_file, &source);
+    let tokens: Vec<_> = parser::Lexer::new(&ectx, input_file, &source)
+        .map(|t| t.val)
+        .collect();
     println!("{:?}", tokens);
 
     Ok(())
