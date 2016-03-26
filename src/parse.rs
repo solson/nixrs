@@ -155,11 +155,24 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
 
     fn next(&mut self) -> Option<Token> {
         match self.peek() {
-            Some(c) if c.is_digit(10) => Some(self.lex_int()),
-            Some(c) if is_whitespace(c) || c == '#' => {
-                self.skip_whitespace_and_comments();
+            Some('#') => {
+                self.skip_line_comment();
                 self.next()
             }
+
+            Some('/') => if self.peek_starts_with("/*") {
+                self.skip_long_comment();
+                self.next()
+            } else {
+                unimplemented!()
+            },
+
+            Some(c) if is_whitespace(c) => {
+                self.skip_whitespace();
+                self.next()
+            }
+
+            Some(c) if c.is_digit(10) => Some(self.lex_int()),
             Some(c) => panic!("unhandled char: {}", c),
             None => None,
         }
@@ -186,26 +199,34 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         self.spanned(start, self.pos(), TokenKind::Int(digits.parse::<i64>().unwrap()))
     }
 
-    fn skip_whitespace_and_comments(&mut self) {
-        while let Some(c) = self.peek() {
-            if c == '#' {
-                for _ in self.chars.take_while_ref(|&d| d != '\n') {}
-            } else if self.peek_starts_with("/*") {
-                self.skip(2);
-                while !self.peek_starts_with("*/") {
-                    if self.peek().is_none() {
-                        // TODO(tsion): Report unterminated comment meeting end of file.
-                        return;
-                    }
-                    self.skip(1);
-                }
-                self.skip(2);
-            } else if is_whitespace(c) {
-                self.skip(1);
-            } else {
-                break;
+    /// Regexp from the Nix lexer: `[ \t\r\n]+`
+    fn skip_whitespace(&mut self) {
+        debug_assert!(self.peek().map(is_whitespace).unwrap_or(false));
+        self.skip_while(is_whitespace);
+    }
+
+    /// Regexp from the Nix lexer: `#[^\r\n]*`
+    fn skip_line_comment(&mut self) {
+        debug_assert_eq!(self.peek(), Some('#'));
+        self.skip_while(|c| c != '\n' && c != '\r');
+    }
+
+    /// Regexp from the Nix lexer: `\/\*([^*]|\*[^\/])*\*\/`
+    fn skip_long_comment(&mut self) {
+        debug_assert!(self.peek_starts_with("/*"));
+        self.skip(2);
+        while !self.peek_starts_with("*/") {
+            if self.peek().is_none() {
+                // TODO(tsion): Report unterminated comment meeting end of file.
+                return;
             }
+            self.skip(1);
         }
+        self.skip(2);
+    }
+
+    fn skip_while<F>(&mut self, mut f: F) where F: FnMut(char) -> bool {
+        for _ in self.chars.take_while_ref(|&c| f(c)) {}
     }
 
     fn skip(&mut self, count: usize) {
@@ -272,6 +293,7 @@ mod test {
     #[test]
     fn test_whitespace_and_comments() {
         assert_lex!("" => []);
+        assert_lex!("/* just a comment */" => []);
         assert_lex!("\n\n\t\r\n # comments and\n /* whitespace\n don't /* matter */\n\n\n" => []);
         assert_lex!("\n  1\n13 \n 42\n" => [
             "2:3-2:4" => Int(1),
