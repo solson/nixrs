@@ -132,6 +132,14 @@ impl<'a> Iterator for CharsPos<'a> {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Character classification
+////////////////////////////////////////////////////////////////////////////////
+
+fn is_whitespace(c: char) -> bool {
+    match c { ' ' | '\t' | '\r' | '\n' => true, _ => false }
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Lexer
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -148,6 +156,10 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
     fn next(&mut self) -> Option<Token> {
         match self.peek() {
             Some(c) if c.is_digit(10) => Some(self.lex_int()),
+            Some(c) if is_whitespace(c) || c == '#' => {
+                self.skip_whitespace_and_comments();
+                self.next()
+            }
             Some(c) => panic!("unhandled char: {}", c),
             None => None,
         }
@@ -172,6 +184,19 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
 
         // TODO(tsion): Detect and diagnose integer overflow.
         self.spanned(start, self.pos(), TokenKind::Int(digits.parse::<i64>().unwrap()))
+    }
+
+    // TODO(tsion): Long comments of the form /* foo */
+    fn skip_whitespace_and_comments(&mut self) {
+        while let Some(c) = self.peek() {
+            if c == '#' {
+                for _ in self.chars.take_while_ref(|&d| d != '\n') {}
+            } else if is_whitespace(c) {
+                self.chars.next();
+            } else {
+                break;
+            }
+        }
     }
 
     fn peek(&self) -> Option<char> {
@@ -202,9 +227,10 @@ pub fn lex(ectx: &EvalContext, filename: &str, source: &str) -> Vec<Token> {
 mod test {
     use context::EvalContext;
     use parse::{Lexer, TokenKind};
+    use parse::TokenKind::*;
 
     macro_rules! assert_lex {
-        ($src:expr => [ $($span:expr => $token:expr),* ]) => ({
+        ($src:expr => [ $($span:expr => $token:expr),* $(,)* ]) => ({
             let expected = [ $(($token, String::from($span))),* ];
             assert_eq!(lex($src), expected);
         })
@@ -217,9 +243,25 @@ mod test {
     }
 
     #[test]
-    fn test_lex() {
-        use parse::TokenKind::*;
-        assert_lex!("" => []);
+    fn test_ints() {
         assert_lex!("0" => ["1:1-1:2" => Int(0)]);
+        assert_lex!("42" => ["1:1-1:3" => Int(42)]);
+        assert_lex!("1 2" => ["1:1-1:2" => Int(1), "1:3-1:4" => Int(2)]);
+    }
+
+    #[test]
+    fn test_whitespace_and_comments() {
+        assert_lex!("" => []);
+        assert_lex!("\n\n\t\r\n # comments and whitespace don't mean a thing\n\n\n" => []);
+        assert_lex!("\n  1\n13 \n 42\n" => [
+            "2:3-2:4" => Int(1),
+            "3:1-3:3" => Int(13),
+            "4:2-4:4" => Int(42),
+        ]);
+        assert_lex!("# line comment\n  1 ### lex this please\n13 \n 42\n# end of file" => [
+            "2:3-2:4" => Int(1),
+            "3:1-3:3" => Int(13),
+            "4:2-4:4" => Int(42),
+        ]);
     }
 }
