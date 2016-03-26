@@ -26,8 +26,8 @@ fn result_main() -> io::Result<()> {
     let mut source = String::new();
     try!(try!(File::open(input_file)).read_to_string(&mut source));
 
-    let ectx = EvalContext::new();
-    let tokens: Vec<_> = Lexer::new(&ectx, input_file, &source)
+    let ctx = EvalContext::new();
+    let tokens: Vec<_> = Lexer::new(&ctx, input_file, &source)
         .map(|t| t.val)
         .collect();
     println!("{:?}", tokens);

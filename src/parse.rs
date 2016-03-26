@@ -152,7 +152,7 @@ fn is_whitespace(c: char) -> bool {
 ////////////////////////////////////////////////////////////////////////////////
 
 pub struct Lexer<'ctx, 'src> {
-    ectx: &'ctx EvalContext,
+    ctx: &'ctx EvalContext,
     source: &'src str,
     chars: CharsPos<'src>,
     filename: Symbol,
@@ -189,12 +189,12 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
 }
 
 impl<'ctx, 'src> Lexer<'ctx, 'src> {
-    pub fn new(ectx: &'ctx EvalContext, filename: &str, source: &'src str) -> Self {
+    pub fn new(ctx: &'ctx EvalContext, filename: &str, source: &'src str) -> Self {
         Lexer {
-            ectx: ectx,
+            ctx: ctx,
             source: source,
             chars: CharsPos::new(source.chars()),
-            filename: ectx.intern(filename),
+            filename: ctx.intern(filename),
         }
     }
 
@@ -203,7 +203,7 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         let chars = self.chars.as_str();
         let len = self.chars.take_while_ref(|&c| is_identifier_continue(c)).count();
         let identifier = &chars[..len];
-        self.spanned(start, self.pos(), TokenKind::Id(self.ectx.intern(identifier)))
+        self.spanned(start, self.pos(), TokenKind::Id(self.ctx.intern(identifier)))
     }
 
     fn lex_int(&mut self) -> Token {
@@ -273,8 +273,8 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
     }
 }
 
-pub fn lex(ectx: &EvalContext, filename: &str, source: &str) -> Vec<Token> {
-    Lexer::new(ectx, filename, source).collect()
+pub fn lex(ctx: &EvalContext, filename: &str, source: &str) -> Vec<Token> {
+    Lexer::new(ctx, filename, source).collect()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
