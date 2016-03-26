@@ -161,28 +161,28 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Token> {
-        match self.peek() {
-            Some('#') => {
+        let c = match self.peek() { Some(c) => c, None => return None };
+        match c {
+            '#' => {
                 self.skip_line_comment();
                 self.next()
             }
 
-            Some('/') => if self.peek_starts_with("/*") {
+            '/' => if self.peek_starts_with("/*") {
                 self.skip_long_comment();
                 self.next()
             } else {
                 unimplemented!()
             },
 
-            Some(c) if is_whitespace(c) => {
+            c if is_whitespace(c) => {
                 self.skip_whitespace();
                 self.next()
             }
 
-            Some(c) if is_identifier_start(c) => Some(self.lex_identifier()),
-            Some(c) if c.is_digit(10) => Some(self.lex_int()),
-            Some(c) => panic!("unhandled char: {}", c),
-            None => None,
+            c if is_identifier_start(c) => Some(self.lex_identifier()),
+            c if c.is_digit(10) => Some(self.lex_int()),
+            c => panic!("unhandled char: {}", c),
         }
     }
 }
