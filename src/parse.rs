@@ -175,14 +175,14 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
                 unimplemented!()
             },
 
-            c if is_whitespace(c) => {
+            _ if is_whitespace(c) => {
                 self.skip_whitespace();
                 self.next()
             }
 
-            c if is_identifier_start(c) => Some(self.lex_identifier()),
-            c if c.is_digit(10) => Some(self.lex_int()),
-            c => panic!("unhandled char: {}", c),
+            _ if is_identifier_start(c) => Some(self.lex_identifier()),
+            _ if c.is_digit(10) => Some(self.lex_int()),
+            _ => panic!("unhandled char: {}", c),
         }
     }
 }
