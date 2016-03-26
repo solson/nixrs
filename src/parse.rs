@@ -101,7 +101,11 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
 
     fn lex_int(&mut self) -> Token {
         let start = self.pos;
-        let digits: String = self.chars.take_while_ref(|c| c.is_digit(10)).collect();
+        let chars = self.chars.as_str();
+        let num_digits = self.chars.take_while_ref(|c| c.is_digit(10)).count();
+        let digits = &chars[..num_digits];
+
+        // TODO(tsion): Detect and diagnose integer overflow.
         self.spanned(start, self.pos, TokenKind::Int(digits.parse::<i64>().unwrap()))
     }
 
