@@ -135,6 +135,14 @@ impl<'a> Iterator for CharsPos<'a> {
 // Character classification
 ////////////////////////////////////////////////////////////////////////////////
 
+fn is_identifier_start(c: char) -> bool {
+    match c { 'a' ... 'z' | 'A' ... 'Z' | '_' => true, _ => false }
+}
+
+fn is_identifier_continue(c: char) -> bool {
+    match c { 'a' ... 'z' | 'A' ... 'Z' | '_' | '0' ... '9' | '\'' | '-' => true, _ => false }
+}
+
 fn is_whitespace(c: char) -> bool {
     match c { ' ' | '\t' | '\r' | '\n' => true, _ => false }
 }
@@ -172,6 +180,7 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
                 self.next()
             }
 
+            Some(c) if is_identifier_start(c) => Some(self.lex_identifier()),
             Some(c) if c.is_digit(10) => Some(self.lex_int()),
             Some(c) => panic!("unhandled char: {}", c),
             None => None,
@@ -187,6 +196,14 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             chars: CharsPos::new(source.chars()),
             filename: ectx.intern(filename),
         }
+    }
+
+    fn lex_identifier(&mut self) -> Token {
+        let start = self.pos();
+        let chars = self.chars.as_str();
+        let len = self.chars.take_while_ref(|&c| is_identifier_continue(c)).count();
+        let identifier = &chars[..len];
+        self.spanned(start, self.pos(), TokenKind::Id(self.ectx.intern(identifier)))
     }
 
     fn lex_int(&mut self) -> Token {
@@ -289,6 +306,8 @@ mod test {
         assert_lex!("42" => ["1:1-1:3" => Int(42)]);
         assert_lex!("1 2" => ["1:1-1:2" => Int(1), "1:3-1:4" => Int(2)]);
     }
+
+    // TODO(tsion): Figure out how to handle checking Symbols and then add identifier tests.
 
     #[test]
     fn test_whitespace_and_comments() {
