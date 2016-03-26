@@ -3,7 +3,7 @@ extern crate nixrs;
 
 use clap::{Arg, App};
 use nixrs::context::EvalContext;
-use nixrs::parser;
+use nixrs::parse::Lexer;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -27,7 +27,7 @@ fn result_main() -> io::Result<()> {
     try!(try!(File::open(input_file)).read_to_string(&mut source));
 
     let ectx = EvalContext::new();
-    let tokens: Vec<_> = parser::Lexer::new(&ectx, input_file, &source)
+    let tokens: Vec<_> = Lexer::new(&ectx, input_file, &source)
         .map(|t| t.val)
         .collect();
     println!("{:?}", tokens);

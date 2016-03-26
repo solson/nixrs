@@ -1,5 +1,5 @@
 extern crate itertools;
 
 pub mod context;
-pub mod parser;
+pub mod parse;
 pub mod symbol_table;
