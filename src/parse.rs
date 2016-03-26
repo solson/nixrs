@@ -5,10 +5,20 @@ use std::str::Chars;
 use context::EvalContext;
 use symbol_table::Symbol;
 
+////////////////////////////////////////////////////////////////////////////////
+// Token positions and spans
+////////////////////////////////////////////////////////////////////////////////
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Pos {
     column: usize,
     line: usize,
+}
+
+impl fmt::Display for Pos {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}:{}", self.line, self.column)
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -23,6 +33,10 @@ pub struct Spanned<T> {
     pub val: T,
     pub span: Span,
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Token kinds
+////////////////////////////////////////////////////////////////////////////////
 
 pub type Token = Spanned<TokenKind>;
 
@@ -81,11 +95,63 @@ pub enum TokenKind {
     BraceR,     // }
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// CharsPos - A &str iterator which tracks line/column positions.
+////////////////////////////////////////////////////////////////////////////////
+
+/// An iterator wrapping a `std::str::Chars` iterator which also keeps track of the current line
+/// and column position.
+#[derive(Clone)]
+struct CharsPos<'a> {
+    chars: Chars<'a>,
+    pos: Pos,
+}
+
+impl<'a> CharsPos<'a> {
+    fn new(chars: Chars<'a>) -> Self {
+        CharsPos { chars: chars, pos: Pos { line: 1, column: 1 } }
+    }
+
+    fn as_str(&self) -> &'a str {
+        self.chars.as_str()
+    }
+}
+
+impl<'a> Iterator for CharsPos<'a> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<char> {
+        let opt_c = self.chars.next();
+        match opt_c {
+            Some('\n') => { self.pos.line += 1; self.pos.column = 1; }
+            Some(_) => { self.pos.column += 1; }
+            None => {}
+        }
+        opt_c
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Lexer
+////////////////////////////////////////////////////////////////////////////////
+
 pub struct Lexer<'ctx, 'src> {
     ectx: &'ctx EvalContext,
     source: &'src str,
     chars: CharsPos<'src>,
     filename: Symbol,
+}
+
+impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Token> {
+        match self.peek() {
+            Some(c) if c.is_digit(10) => Some(self.lex_int()),
+            Some(c) => panic!("unhandled char: {}", c),
+            None => None,
+        }
+    }
 }
 
 impl<'ctx, 'src> Lexer<'ctx, 'src> {
@@ -124,59 +190,13 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
     }
 }
 
-impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
-    type Item = Token;
-
-    fn next(&mut self) -> Option<Token> {
-        match self.peek() {
-            Some(c) if c.is_digit(10) => Some(self.lex_int()),
-            Some(c) => panic!("unhandled char: {}", c),
-            None => None,
-        }
-    }
-}
-
-/// An iterator wrapping a `std::str::Chars` iterator which also keeps track of the current line
-/// and column position.
-#[derive(Clone)]
-struct CharsPos<'a> {
-    chars: Chars<'a>,
-    pos: Pos,
-}
-
-impl<'a> CharsPos<'a> {
-    fn new(chars: Chars<'a>) -> Self {
-        CharsPos { chars: chars, pos: Pos { line: 1, column: 1 } }
-    }
-
-    fn as_str(&self) -> &'a str {
-        self.chars.as_str()
-    }
-}
-
-impl<'a> Iterator for CharsPos<'a> {
-    type Item = char;
-
-    fn next(&mut self) -> Option<char> {
-        let opt_c = self.chars.next();
-        match opt_c {
-            Some('\n') => { self.pos.line += 1; self.pos.column = 1; }
-            Some(_) => { self.pos.column += 1; }
-            None => {}
-        }
-        opt_c
-    }
-}
-
 pub fn lex(ectx: &EvalContext, filename: &str, source: &str) -> Vec<Token> {
     Lexer::new(ectx, filename, source).collect()
 }
 
-impl fmt::Display for Pos {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}:{}", self.line, self.column)
-    }
-}
+////////////////////////////////////////////////////////////////////////////////
+// Tests
+////////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
 mod test {
