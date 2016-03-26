@@ -186,17 +186,37 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         self.spanned(start, self.pos(), TokenKind::Int(digits.parse::<i64>().unwrap()))
     }
 
-    // TODO(tsion): Long comments of the form /* foo */
     fn skip_whitespace_and_comments(&mut self) {
         while let Some(c) = self.peek() {
             if c == '#' {
                 for _ in self.chars.take_while_ref(|&d| d != '\n') {}
+            } else if self.peek_starts_with("/*") {
+                self.skip(2);
+                while !self.peek_starts_with("*/") {
+                    if self.peek().is_none() {
+                        // TODO(tsion): Report unterminated comment meeting end of file.
+                        return;
+                    }
+                    self.skip(1);
+                }
+                self.skip(2);
             } else if is_whitespace(c) {
-                self.chars.next();
+                self.skip(1);
             } else {
                 break;
             }
         }
+    }
+
+    fn skip(&mut self, count: usize) {
+        for _ in 0..count {
+            let _c = self.chars.next();
+            debug_assert!(_c.is_some());
+        }
+    }
+
+    fn peek_starts_with(&self, s: &str) -> bool {
+        self.chars.as_str().starts_with(s)
     }
 
     fn peek(&self) -> Option<char> {
@@ -252,7 +272,7 @@ mod test {
     #[test]
     fn test_whitespace_and_comments() {
         assert_lex!("" => []);
-        assert_lex!("\n\n\t\r\n # comments and whitespace don't mean a thing\n\n\n" => []);
+        assert_lex!("\n\n\t\r\n # comments and\n /* whitespace\n don't /* matter */\n\n\n" => []);
         assert_lex!("\n  1\n13 \n 42\n" => [
             "2:3-2:4" => Int(1),
             "3:1-3:3" => Int(13),
