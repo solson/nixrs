@@ -174,97 +174,61 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
             Some(self.spanned(start, self.pos(), TokenKind::$kind))
         })}
 
-        let c = match self.peek() { Some(c) => c, None => return None };
-        match c {
-            '#' => {
+        let c1 = match self.peek(0) { Some(c) => c, None => return None };
+        let c2 = self.peek(1);
+
+        match (c1, c2) {
+            ('#', _) => {
                 self.skip_line_comment();
                 self.next()
             }
 
-            '/' => if self.peek_starts_with("/*") {
+            ('/', Some('*')) => {
                 self.skip_long_comment();
                 self.next()
-            } else if self.peek_starts_with("//") {
-                simple!(Update, 2)
-            } else {
-                simple!(Divide, 1)
-            },
+            }
+            ('/', Some('/')) => simple!(Update, 2),
+            ('/', _) => simple!(Divide, 1),
 
-            '*' => simple!(Mult, 1),
-            '@' => simple!(At, 1),
-            ',' => simple!(Comma, 1),
-            '?' => simple!(Question, 1),
-            ':' => simple!(Colon, 1),
-            ';' => simple!(Semicolon, 1),
-            '(' => simple!(ParenL, 1),
-            ')' => simple!(ParenR, 1),
-            '[' => simple!(BracketL, 1),
-            ']' => simple!(BracketR, 1),
-            '{' => simple!(BraceL, 1),
-            '}' => simple!(BraceR, 1),
+            ('*', _) => simple!(Mult, 1),
+            ('@', _) => simple!(At, 1),
+            (',', _) => simple!(Comma, 1),
+            ('?', _) => simple!(Question, 1),
+            (':', _) => simple!(Colon, 1),
+            (';', _) => simple!(Semicolon, 1),
+            ('(', _) => simple!(ParenL, 1),
+            (')', _) => simple!(ParenR, 1),
+            ('[', _) => simple!(BracketL, 1),
+            (']', _) => simple!(BracketR, 1),
+            ('{', _) => simple!(BraceL, 1),
+            ('}', _) => simple!(BraceR, 1),
+            ('-', Some('>')) => simple!(Implies, 2),
+            ('+', Some('+')) => simple!(Concat, 2),
+            ('<', Some('=')) => simple!(LessEq, 2),
+            ('>', Some('=')) => simple!(GreaterEq, 2),
+            ('=', Some('=')) => simple!(Equals, 2),
+            ('!', Some('=')) => simple!(NotEquals, 2),
+            ('&', Some('&')) => simple!(And, 2),
+            ('|', Some('|')) => simple!(Or, 2),
+            ('-', _) => simple!(Minus, 1),
+            ('+', _) => simple!(Plus, 1),
+            ('<', _) => simple!(Less, 1),
+            ('>', _) => simple!(Greater, 1),
+            ('=', _) => simple!(Assign, 1),
+            ('!', _) => simple!(Not, 1),
+            ('&', _) => simple!(Unknown, 1),
+            ('|', _) => simple!(Unknown, 1),
+            ('.', Some('.')) if self.peek(2) == Some('.') => simple!(Ellipsis, 3),
+            ('.', _) => simple!(Dot, 1),
 
-            '-' => if self.peek_starts_with("->") {
-                simple!(Implies, 2)
-            } else {
-                simple!(Minus, 1)
-            },
-
-            '+' => if self.peek_starts_with("++") {
-                simple!(Concat, 2)
-            } else {
-                simple!(Plus, 1)
-            },
-
-            '<' => if self.peek_starts_with("<=") {
-                simple!(LessEq, 2)
-            } else {
-                simple!(Less, 1)
-            },
-
-            '>' => if self.peek_starts_with(">=") {
-                simple!(GreaterEq, 2)
-            } else {
-                simple!(Greater, 1)
-            },
-
-            '=' => if self.peek_starts_with("==") {
-                simple!(Equals, 2)
-            } else {
-                simple!(Assign, 1)
-            },
-
-            '!' => if self.peek_starts_with("!=") {
-                simple!(NotEquals, 2)
-            } else {
-                simple!(Not, 1)
-            },
-
-            '&' => if self.peek_starts_with("&&") {
-                simple!(And, 2)
-            } else {
-                simple!(Unknown, 1)
-            },
-
-            '|' => if self.peek_starts_with("||") {
-                simple!(Or, 2)
-            } else {
-                simple!(Unknown, 1)
-            },
-
-            '.' => if self.peek_starts_with("...") {
-                simple!(Ellipsis, 3)
-            } else {
-                simple!(Dot, 1)
-            },
-
-            _ if is_whitespace(c) => {
+            (c, _) if is_whitespace(c) => {
                 self.skip_whitespace();
                 self.next()
             }
 
-            _ if is_identifier_start(c) => Some(self.lex_identifier()),
-            _ if c.is_digit(10) => Some(self.lex_int()),
-            _ => panic!("unhandled char: {}", c),
+            (c, _) if is_identifier_start(c) => Some(self.lex_identifier()),
+            (c, _) if c.is_digit(10) => Some(self.lex_int()),
+            (c, _) => panic!("unhandled char: {}", c),
         }
     }
 }
@@ -298,13 +262,13 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
 
     /// Regexp from the Nix lexer: `[ \t\r\n]+`
     fn skip_whitespace(&mut self) {
-        debug_assert!(self.peek().map(is_whitespace).unwrap_or(false));
+        debug_assert!(self.peek(0).map(is_whitespace).unwrap_or(false));
         self.skip_while(is_whitespace);
     }
 
     /// Regexp from the Nix lexer: `#[^\r\n]*`
     fn skip_line_comment(&mut self) {
-        debug_assert_eq!(self.peek(), Some('#'));
+        debug_assert_eq!(self.peek(0), Some('#'));
         self.skip_while(|c| c != '\n' && c != '\r');
     }
 
@@ -313,7 +277,7 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         debug_assert!(self.peek_starts_with("/*"));
         self.skip(2);
         while !self.peek_starts_with("*/") {
-            if self.peek().is_none() {
+            if self.peek(0).is_none() {
                 // TODO(tsion): Report unterminated comment meeting end of file.
                 return;
             }
@@ -337,8 +301,8 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         self.chars.as_str().starts_with(s)
     }
 
-    fn peek(&self) -> Option<char> {
-        self.chars.clone().next()
+    fn peek(&self, skip: usize) -> Option<char> {
+        self.chars.clone().skip(skip).next()
     }
 
     fn pos(&self) -> Pos {
