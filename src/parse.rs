@@ -28,6 +28,12 @@ pub struct Span {
     end: Pos,
 }
 
+impl fmt::Display for Span {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}-{}", self.start, self.end)
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Spanned<T> {
     pub val: T,
@@ -294,7 +300,7 @@ mod test {
 
     fn lex(src: &str) -> Vec<(TokenKind, String)> {
         Lexer::new(&EvalContext::new(), "<test>", src)
-            .map(|t| (t.val, format!("{}-{}", t.span.start, t.span.end)))
+            .map(|t| (t.val, t.span.to_string()))
             .collect()
     }
 
