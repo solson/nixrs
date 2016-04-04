@@ -216,8 +216,6 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
             ('>', _) => simple!(Greater, 1),
             ('=', _) => simple!(Assign, 1),
             ('!', _) => simple!(Not, 1),
-            ('&', _) => simple!(Unknown, 1),
-            ('|', _) => simple!(Unknown, 1),
 
             ('.', Some('.')) if self.peek(2) == Some('.') => simple!(Ellipsis, 3),
             ('.', _) => simple!(Dot, 1),
