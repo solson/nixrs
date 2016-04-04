@@ -18,7 +18,7 @@ fn result_main() -> io::Result<()> {
         .author("Scott Olson <scott@solson.me>")
         .about("Nix evaluator")
         .arg(Arg::with_name("INPUT")
-             .help("Sets the input file to use")
+             .help("The input file to use")
              .required(true))
         .get_matches();
 

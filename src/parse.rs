@@ -167,6 +167,13 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Token> {
+        let start = self.pos();
+
+        macro_rules! simple { ($kind:ident, $len:expr) => ({
+            self.skip($len);
+            Some(self.spanned(start, self.pos(), TokenKind::$kind))
+        })}
+
         let c = match self.peek() { Some(c) => c, None => return None };
         match c {
             '#' => {
@@ -177,8 +184,77 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
             '/' => if self.peek_starts_with("/*") {
                 self.skip_long_comment();
                 self.next()
+            } else if self.peek_starts_with("//") {
+                simple!(Update, 2)
             } else {
-                unimplemented!()
+                simple!(Divide, 1)
+            },
+
+            '*' => simple!(Mult, 1),
+            '@' => simple!(At, 1),
+            ',' => simple!(Comma, 1),
+            '?' => simple!(Question, 1),
+            ':' => simple!(Colon, 1),
+            ';' => simple!(Semicolon, 1),
+            '(' => simple!(ParenL, 1),
+            ')' => simple!(ParenR, 1),
+            '[' => simple!(BracketL, 1),
+            ']' => simple!(BracketR, 1),
+            '{' => simple!(BraceL, 1),
+            '}' => simple!(BraceR, 1),
+
+            '-' => if self.peek_starts_with("->") {
+                simple!(Implies, 2)
+            } else {
+                simple!(Minus, 1)
+            },
+
+            '+' => if self.peek_starts_with("++") {
+                simple!(Concat, 2)
+            } else {
+                simple!(Plus, 1)
+            },
+
+            '<' => if self.peek_starts_with("<=") {
+                simple!(LessEq, 2)
+            } else {
+                simple!(Less, 1)
+            },
+
+            '>' => if self.peek_starts_with(">=") {
+                simple!(GreaterEq, 2)
+            } else {
+                simple!(Greater, 1)
+            },
+
+            '=' => if self.peek_starts_with("==") {
+                simple!(Equals, 2)
+            } else {
+                simple!(Assign, 1)
+            },
+
+            '!' => if self.peek_starts_with("!=") {
+                simple!(NotEquals, 2)
+            } else {
+                simple!(Not, 1)
+            },
+
+            '&' => if self.peek_starts_with("&&") {
+                simple!(And, 2)
+            } else {
+                simple!(Unknown, 1)
+            },
+
+            '|' => if self.peek_starts_with("||") {
+                simple!(Or, 2)
+            } else {
+                simple!(Unknown, 1)
+            },
+
+            '.' => if self.peek_starts_with("...") {
+                simple!(Ellipsis, 3)
+            } else {
+                simple!(Dot, 1)
             },
 
             _ if is_whitespace(c) => {
