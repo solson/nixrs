@@ -62,7 +62,7 @@ pub enum TokenKind {
     IndentStrPart(String),
     Quote,          // "
     IndentQuote,    // ''
-    DollarBrace,    // ${
+    DollarBraceL,   // ${
 
     // Operators
     Mult,       // *
@@ -218,8 +218,11 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
             ('!', _) => simple!(Not, 1),
             ('&', _) => simple!(Unknown, 1),
             ('|', _) => simple!(Unknown, 1),
+
             ('.', Some('.')) if self.peek(2) == Some('.') => simple!(Ellipsis, 3),
             ('.', _) => simple!(Dot, 1),
+
+            ('$', Some('{')) => simple!(DollarBraceL, 2),
 
             (c, _) if is_whitespace(c) => {
                 self.skip_whitespace();
