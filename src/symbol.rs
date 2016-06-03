@@ -56,3 +56,9 @@ impl fmt::Debug for Symbol {
         write!(f, "{}:{}", self.as_str(), self.index)
     }
 }
+
+impl fmt::Display for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}

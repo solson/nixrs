@@ -11,8 +11,8 @@ use symbol::Symbol;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Pos {
-    column: usize,
-    line: usize,
+    pub column: usize,
+    pub line: usize,
 }
 
 impl fmt::Display for Pos {
@@ -23,9 +23,9 @@ impl fmt::Display for Pos {
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Span {
-    filename: Symbol,
-    start: Pos,
-    end: Pos,
+    pub filename: Symbol,
+    pub start: Pos,
+    pub end: Pos,
 }
 
 impl fmt::Display for Span {
