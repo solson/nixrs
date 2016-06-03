@@ -3,7 +3,7 @@ use std::fmt;
 use std::str::Chars;
 
 use context::EvalContext;
-use symbol_table::Symbol;
+use symbol::Symbol;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Token positions and spans
@@ -60,9 +60,9 @@ pub enum TokenKind {
     Uri(String),
     StrPart(String),
     IndentStrPart(String),
-    Quote,          // "
-    IndentQuote,    // ''
-    DollarBraceL,   // ${
+    Quote,        // "
+    IndentQuote,  // ''
+    DollarBraceL, // ${
 
     // Operators
     Mult,       // *
@@ -239,7 +239,7 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         Lexer {
             ctx: ctx,
             chars: CharsPos::new(source.chars()),
-            filename: ctx.intern(filename),
+            filename: Symbol::new(filename),
         }
     }
 
@@ -248,7 +248,7 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         let chars = self.chars.as_str();
         let len = self.chars.take_while_ref(|&c| is_identifier_continue(c)).count();
         let identifier = &chars[..len];
-        self.spanned(start, self.pos(), TokenKind::Id(self.ctx.intern(identifier)))
+        self.spanned(start, self.pos(), TokenKind::Id(Symbol::new(identifier)))
     }
 
     fn lex_int(&mut self) -> Token {

@@ -6,3 +6,4 @@ version = "0.1.0"
 [dependencies]
 clap = "2.1.2"
 itertools = "0.4.11"
+lazy_static = "0.2.1"
