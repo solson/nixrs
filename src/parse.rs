@@ -331,9 +331,14 @@ mod test {
     use context::EvalContext;
     use parse::{Lexer, TokenKind};
     use parse::TokenKind::*;
+    use symbol::Symbol;
+
+    ////////////////////////////////////////////////////////////////////////////////
+    // Helper functions
+    ////////////////////////////////////////////////////////////////////////////////
 
     macro_rules! assert_lex {
-        ($src:expr => [ $($span:expr => $token:expr),* $(,)* ]) => ({
+        ($src:expr, [ $($span:expr => $token:expr),* $(,)* ]) => ({
             let expected = [ $(($token, String::from($span))),* ];
             assert_eq!(lex($src), expected);
         })
@@ -345,26 +350,44 @@ mod test {
             .collect()
     }
 
-    #[test]
-    fn test_ints() {
-        assert_lex!("0" => ["1:1-1:2" => Int(0)]);
-        assert_lex!("42" => ["1:1-1:3" => Int(42)]);
-        assert_lex!("1 2" => ["1:1-1:2" => Int(1), "1:3-1:4" => Int(2)]);
+    fn id(name: &str) -> TokenKind {
+        Id(Symbol::new(name))
     }
 
-    // TODO(tsion): Figure out how to handle checking Symbols and then add identifier tests.
+    ////////////////////////////////////////////////////////////////////////////////
+    // Lexer tests
+    ////////////////////////////////////////////////////////////////////////////////
 
     #[test]
-    fn test_whitespace_and_comments() {
-        assert_lex!("" => []);
-        assert_lex!("/* just a comment */" => []);
-        assert_lex!("\n\n\t\r\n # comments and\n /* whitespace\n don't /* matter */\n\n\n" => []);
-        assert_lex!("\n  1\n13 \n 42\n" => [
+    fn lex_ints() {
+        assert_lex!("0",   ["1:1-1:2" => Int(0)]);
+        assert_lex!("42",  ["1:1-1:3" => Int(42)]);
+        assert_lex!("1 2", ["1:1-1:2" => Int(1), "1:3-1:4" => Int(2)]);
+    }
+
+    #[test]
+    fn lex_identifiers() {
+        assert_lex!("a", ["1:1-1:2" => id("a")]);
+        assert_lex!("b", ["1:1-1:2" => id("b")]);
+        assert_lex!("a a b", [
+            "1:1-1:2" => id("a"),
+            "1:3-1:4" => id("a"),
+            "1:5-1:6" => id("b"),
+        ]);
+        assert_lex!("foobar", ["1:1-1:7" => id("foobar")]);
+    }
+
+    #[test]
+    fn lex_whitespace_and_comments() {
+        assert_lex!("", []);
+        assert_lex!("/* just a comment */", []);
+        assert_lex!("\n\n\t\r\n # comments and\n /* whitespace\n don't /* matter */\n\n\n", []);
+        assert_lex!("\n  1\n13 \n 42\n", [
             "2:3-2:4" => Int(1),
             "3:1-3:3" => Int(13),
             "4:2-4:4" => Int(42),
         ]);
-        assert_lex!("# line comment\n  1 ### lex this please\n13 \n 42\n# end of file" => [
+        assert_lex!("# line comment\n  1 ### lex this please\n13 \n 42\n# end of file", [
             "2:3-2:4" => Int(1),
             "3:1-3:3" => Int(13),
             "4:2-4:4" => Int(42),
