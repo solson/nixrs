@@ -99,6 +99,18 @@ pub enum TokenKind {
     BracketR,   // ]
     BraceL,     // {
     BraceR,     // }
+
+    // Keywords
+    KeywordIf,
+    KeywordThen,
+    KeywordElse,
+    KeywordAssert,
+    KeywordWith,
+    KeywordLet,
+    KeywordIn,
+    KeywordRec,
+    KeywordInherit,
+    KeywordOr,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -227,7 +239,7 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
                 self.next()
             }
 
-            (c, _) if is_identifier_start(c) => Some(self.lex_identifier()),
+            (c, _) if is_identifier_start(c) => Some(self.lex_ident_or_keyword()),
             (c, _) if c.is_digit(10) => Some(self.lex_int()),
             (c, _) => panic!("unhandled char: {}", c),
         }
@@ -243,12 +255,27 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         }
     }
 
-    fn lex_identifier(&mut self) -> Token {
+    fn lex_ident_or_keyword(&mut self) -> Token {
         let start = self.pos();
         let chars = self.chars.as_str();
         let len = self.chars.take_while_ref(|&c| is_identifier_continue(c)).count();
         let identifier = &chars[..len];
-        self.spanned(start, self.pos(), TokenKind::Id(Symbol::new(identifier)))
+
+        let kind = match identifier {
+            "if"      => TokenKind::KeywordIf,
+            "then"    => TokenKind::KeywordThen,
+            "else"    => TokenKind::KeywordElse,
+            "assert"  => TokenKind::KeywordAssert,
+            "with"    => TokenKind::KeywordWith,
+            "let"     => TokenKind::KeywordLet,
+            "in"      => TokenKind::KeywordIn,
+            "rec"     => TokenKind::KeywordRec,
+            "inherit" => TokenKind::KeywordInherit,
+            "or"      => TokenKind::KeywordOr,
+            _         => TokenKind::Id(Symbol::new(identifier)),
+        };
+
+        self.spanned(start, self.pos(), kind)
     }
 
     fn lex_int(&mut self) -> Token {
@@ -366,7 +393,7 @@ mod test {
     }
 
     #[test]
-    fn lex_identifiers() {
+    fn lex_idents() {
         assert_lex!("a", ["1:1-1:2" => id("a")]);
         assert_lex!("b", ["1:1-1:2" => id("b")]);
         assert_lex!("a a b", [
@@ -375,6 +402,12 @@ mod test {
             "1:5-1:6" => id("b"),
         ]);
         assert_lex!("foobar", ["1:1-1:7" => id("foobar")]);
+    }
+
+    #[test]
+    fn lex_ints_vs_idents() {
+        assert_lex!("a1", ["1:1-1:3" => id("a1")]);
+        assert_lex!("1a", ["1:1-1:2" => Int(1), "1:2-1:3" => id("a")]);
     }
 
     #[test]
