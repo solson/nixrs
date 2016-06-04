@@ -173,12 +173,41 @@ pub struct Lexer<'ctx, 'src> {
     ctx: &'ctx EvalContext,
     chars: CharsPos<'src>,
     filename: Symbol,
+    state_stack: Vec<LexerState>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum LexerState {
+    Normal,
+    String,
 }
 
 impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Token> {
+        match self.state() {
+            LexerState::Normal => self.lex_normal(),
+            LexerState::String => self.lex_string_part(),
+        }
+    }
+}
+
+impl<'ctx, 'src> Lexer<'ctx, 'src> {
+    pub fn new(ctx: &'ctx EvalContext, filename: &str, source: &'src str) -> Self {
+        Lexer {
+            ctx: ctx,
+            chars: CharsPos::new(source.chars()),
+            filename: Symbol::new(filename),
+            state_stack: Vec::new(),
+        }
+    }
+
+    fn state(&self) -> LexerState {
+        *self.state_stack.last().unwrap_or(&LexerState::Normal)
+    }
+
+    fn lex_normal(&mut self) -> Option<Token> {
         let start = self.pos();
 
         macro_rules! simple { ($kind:ident, $len:expr) => ({
@@ -234,6 +263,11 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
 
             ('$', Some('{')) => simple!(DollarBraceL, 2),
 
+            ('"', _) => {
+                self.state_stack.push(LexerState::String);
+                simple!(Quote, 1)
+            }
+
             (c, _) if is_whitespace(c) => {
                 self.skip_whitespace();
                 self.next()
@@ -244,15 +278,50 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
             (c, _) => panic!("unhandled char: {}", c),
         }
     }
-}
 
-impl<'ctx, 'src> Lexer<'ctx, 'src> {
-    pub fn new(ctx: &'ctx EvalContext, filename: &str, source: &'src str) -> Self {
-        Lexer {
-            ctx: ctx,
-            chars: CharsPos::new(source.chars()),
-            filename: Symbol::new(filename),
+    fn lex_string_part(&mut self) -> Option<Token> {
+        let start = self.pos();
+
+        if let Some('"') = self.peek(0) {
+            self.skip(1); // Skip over the quote.
+            let _state = self.state_stack.pop(); // Pop the string state.
+            debug_assert_eq!(_state, Some(LexerState::String));
+            return Some(self.spanned(start, self.pos(), TokenKind::Quote));
         }
+
+        let mut chars = String::new();
+
+        loop {
+            let c1 = match self.peek(0) { Some(c) => c, None => return None };
+            let c2 = self.peek(1);
+
+            match (c1, c2) {
+                ('\\', Some(c)) => {
+                    self.skip(2);
+                    chars.push(match c {
+                        'n' => '\n',
+                        'r' => '\r',
+                        't' => '\t',
+                        _ => c,
+                    });
+                }
+                ('\\', None) => {
+                    // TODO(solson): Report character escape meeting end of file.
+                    panic!("character escape hit end of file");
+                }
+
+                ('$', Some('{')) => unimplemented!(),
+                ('$', _) => { self.skip(1); chars.push('$'); }
+
+                ('"', _) => break,
+
+                ('\r', Some('\n')) => { self.skip(2); chars.push('\n'); }
+                ('\r', _) => { self.skip(1); chars.push('\n'); }
+                _ => { self.skip(1); chars.push(c1); }
+            };
+        }
+
+        Some(self.spanned(start, self.pos(), TokenKind::StrPart(chars)))
     }
 
     fn lex_ident_or_keyword(&mut self) -> Token {
