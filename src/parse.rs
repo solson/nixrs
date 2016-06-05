@@ -298,8 +298,8 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             }
 
             // If we're lexing inside of a string interpolation, we need to keep track of our depth
-            // of nested curly braces (because when we need to end up back in `String` lexing mode
-            // after the correct matching '}').
+            // of nested curly braces (because we need to end up back in `String` lexing mode after
+            // the correct matching '}').
             //
             // We simply push and pop on the `state_stack` for this. Since deep nesting is rare, it
             // shouldn't be a performance problem.
