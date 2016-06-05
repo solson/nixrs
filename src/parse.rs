@@ -529,6 +529,10 @@ mod test {
         Id(Symbol::new(name))
     }
 
+    fn str_part(s: &str) -> TokenKind {
+        StrPart(String::from(s))
+    }
+
     ////////////////////////////////////////////////////////////////////////////////
     // Lexer tests
     ////////////////////////////////////////////////////////////////////////////////
@@ -556,6 +560,70 @@ mod test {
     fn lex_ints_vs_idents() {
         assert_lex!("a1", ["1:1-1:3" => id("a1")]);
         assert_lex!("1a", ["1:1-1:2" => Int(1), "1:2-1:3" => id("a")]);
+    }
+
+    #[test]
+    fn lex_double_quote() {
+        assert_lex!(r#""""#, [
+            "1:1-1:2" => Quote,
+            "1:2-1:3" => Quote,
+        ]);
+        assert_lex!(r#"" ""#, [
+            "1:1-1:2" => Quote,
+            "1:2-1:3" => str_part(" "),
+            "1:3-1:4" => Quote,
+        ]);
+        assert_lex!(r#""\a\b\c\\\"\n\r\t\${}""#, [
+            "1:1-1:2"   => Quote,
+            "1:2-1:22"  => str_part("abc\\\"\n\r\t${}"),
+            "1:22-1:23" => Quote,
+        ]);
+        assert_lex!(r#""foobar""#, [
+            "1:1-1:2" => Quote,
+            "1:2-1:8" => str_part("foobar"),
+            "1:8-1:9" => Quote,
+        ]);
+
+        // Literal newlines and carriage returns to test normalization to newlines.
+        // FIXME(solson): Should the stray \r get counted as a line break for spans? That would
+        // make this end up on line 5 rather than line 4.
+        assert_lex!("\"foo\n \r \n \r\n bar\"", [
+            "1:1-1:2" => Quote,
+            "1:2-4:5" => str_part("foo\n \n \n \n bar"),
+            "4:5-4:6" => Quote,
+        ]);
+    }
+
+    #[test]
+    fn lex_double_quote_interpolation() {
+        assert_lex!(r#""${}""#, [
+            "1:1-1:2" => Quote,
+            "1:2-1:4" => DollarBraceL,
+            "1:4-1:5" => BraceR,
+            "1:5-1:6" => Quote,
+        ]);
+        assert_lex!(r#""foo${}""#, [
+            "1:1-1:2" => Quote,
+            "1:2-1:5" => str_part("foo"),
+            "1:5-1:7" => DollarBraceL,
+            "1:7-1:8" => BraceR,
+            "1:8-1:9" => Quote,
+        ]);
+        assert_lex!(r#""${}bar""#, [
+            "1:1-1:2" => Quote,
+            "1:2-1:4" => DollarBraceL,
+            "1:4-1:5" => BraceR,
+            "1:5-1:8" => str_part("bar"),
+            "1:8-1:9" => Quote,
+        ]);
+        assert_lex!(r#""foo${}bar""#, [
+            "1:1-1:2" => Quote,
+            "1:2-1:5" => str_part("foo"),
+            "1:5-1:7" => DollarBraceL,
+            "1:7-1:8" => BraceR,
+            "1:8-1:11" => str_part("bar"),
+            "1:11-1:12" => Quote,
+        ]);
     }
 
     #[test]
