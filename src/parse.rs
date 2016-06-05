@@ -173,13 +173,22 @@ pub struct Lexer<'ctx, 'src> {
     ctx: &'ctx EvalContext,
     chars: CharsPos<'src>,
     filename: Symbol,
+
+    /// A record of the levels of nesting the lexer is currently in. The last state is the most
+    /// deeply nested. An empty stack implies the lexer is at the normal top-level.
     state_stack: Vec<LexerState>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum LexerState {
+    /// When the lexer is at the top-level, not nested inside strings.
     Normal,
+
+    /// When the lexer is inside a string.
     String,
+
+    /// When the lexer is in a `${}` interpolation inside a string.
+    Interpolation,
 }
 
 impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
@@ -187,7 +196,7 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
 
     fn next(&mut self) -> Option<Token> {
         match self.state() {
-            LexerState::Normal => self.lex_normal(),
+            LexerState::Normal | LexerState::Interpolation => self.lex_normal(),
             LexerState::String => self.lex_string_part(),
         }
     }
@@ -208,6 +217,8 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
     }
 
     fn lex_normal(&mut self) -> Option<Token> {
+        debug_assert!(self.state() == LexerState::Normal ||
+                      self.state() == LexerState::Interpolation);
         let start = self.pos();
 
         macro_rules! simple { ($kind:ident, $len:expr) => ({
@@ -215,19 +226,39 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             Some(self.spanned(start, self.pos(), TokenKind::$kind))
         })}
 
-        let c1 = match self.peek(0) { Some(c) => c, None => return None };
+        let c1 = match self.peek(0) {
+            Some(c) => c,
+            None => {
+                if self.state() == LexerState::Interpolation {
+                    // TODO(solson): Report unterminated string hitting end of file.
+                    panic!("unterminated string hit end of file (inside Interpolation)");
+                } else {
+                    return None;
+                }
+            }
+        };
         let c2 = self.peek(1);
 
         match (c1, c2) {
+            // Whitespace and comments.
+
+            (c, _) if is_whitespace(c) => {
+                self.skip_whitespace();
+                self.lex_normal()
+            }
+
             ('#', _) => {
                 self.skip_line_comment();
-                self.next()
+                self.lex_normal()
             }
 
             ('/', Some('*')) => {
                 self.skip_long_comment();
-                self.next()
+                self.lex_normal()
             }
+
+            // Various fixed-length symbol tokens.
+
             ('/', Some('/')) => simple!(Update, 2),
             ('/', _) => simple!(Divide, 1),
 
@@ -241,8 +272,6 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             (')', _) => simple!(ParenR, 1),
             ('[', _) => simple!(BracketL, 1),
             (']', _) => simple!(BracketR, 1),
-            ('{', _) => simple!(BraceL, 1),
-            ('}', _) => simple!(BraceR, 1),
             ('-', Some('>')) => simple!(Implies, 2),
             ('+', Some('+')) => simple!(Concat, 2),
             ('<', Some('=')) => simple!(LessEq, 2),
@@ -261,17 +290,42 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             ('.', Some('.')) if self.peek(2) == Some('.') => simple!(Ellipsis, 3),
             ('.', _) => simple!(Dot, 1),
 
-            ('$', Some('{')) => simple!(DollarBraceL, 2),
+            // The beginning of a string.
 
             ('"', _) => {
                 self.state_stack.push(LexerState::String);
                 simple!(Quote, 1)
             }
 
-            (c, _) if is_whitespace(c) => {
-                self.skip_whitespace();
-                self.next()
+            // If we're lexing inside of a string interpolation, we need to keep track of our depth
+            // of nested curly braces (because when we need to end up back in `String` lexing mode
+            // after the correct matching '}').
+            //
+            // We simply push and pop on the `state_stack` for this. Since deep nesting is rare, it
+            // shouldn't be a performance problem.
+
+            ('$', Some('{')) => {
+                if self.state() == LexerState::Interpolation {
+                    self.state_stack.push(LexerState::Interpolation);
+                }
+                simple!(DollarBraceL, 2)
             }
+
+            ('{', _) => {
+                if self.state() == LexerState::Interpolation {
+                    self.state_stack.push(LexerState::Interpolation);
+                }
+                simple!(BraceL, 1)
+            }
+
+            ('}', _) => {
+                if self.state() == LexerState::Interpolation {
+                    self.state_stack.pop();
+                }
+                simple!(BraceR, 1)
+            }
+
+            // Identifier and integer tokens.
 
             (c, _) if is_identifier_start(c) => Some(self.lex_ident_or_keyword()),
             (c, _) if c.is_digit(10) => Some(self.lex_int()),
@@ -280,6 +334,7 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
     }
 
     fn lex_string_part(&mut self) -> Option<Token> {
+        debug_assert_eq!(self.state(), LexerState::String);
         let start = self.pos();
 
         if let Some('"') = self.peek(0) {
@@ -292,7 +347,13 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         let mut chars = String::new();
 
         loop {
-            let c1 = match self.peek(0) { Some(c) => c, None => return None };
+            let c1 = match self.peek(0) {
+                Some(c) => c,
+                None => {
+                    // TODO(solson): Report string meeting end of file.
+                    panic!("unclosed string hit end of file");
+                }
+            };
             let c2 = self.peek(1);
 
             match (c1, c2) {
@@ -306,17 +367,35 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
                     });
                 }
                 ('\\', None) => {
-                    // TODO(solson): Report character escape meeting end of file.
+                    // TODO(solson): Report character escape (or string?) meeting end of file.
                     panic!("character escape hit end of file");
                 }
 
-                ('$', Some('{')) => unimplemented!(),
-                ('$', _) => { self.skip(1); chars.push('$'); }
+                ('$', Some('{')) => {
+                    if chars.is_empty() {
+                        self.skip(2); // Skip over the '${'.
+                        self.state_stack.push(LexerState::Interpolation);
+                        return Some(self.spanned(start, self.pos(), TokenKind::DollarBraceL));
+                    } else {
+                        break;
+                    }
+                }
 
-                ('"', _) => break,
+                ('"', _) => {
+                    if chars.is_empty() {
+                        self.skip(1); // Skip over the quote.
+                        let _state = self.state_stack.pop(); // Pop the string state.
+                        debug_assert_eq!(_state, Some(LexerState::String));
+                        return Some(self.spanned(start, self.pos(), TokenKind::Quote));
+                    } else {
+                        break;
+                    }
+                }
 
+                // Replace literal \r and \r\n character sequences in multiline strings with \n.
                 ('\r', Some('\n')) => { self.skip(2); chars.push('\n'); }
-                ('\r', _) => { self.skip(1); chars.push('\n'); }
+                ('\r', _)          => { self.skip(1); chars.push('\n'); }
+
                 _ => { self.skip(1); chars.push(c1); }
             };
         }
