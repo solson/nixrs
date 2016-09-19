@@ -7,6 +7,7 @@ pub struct Symbol {
     index: u32,
 }
 
+#[derive(Default)]
 struct SymbolTable {
     str_to_sym: HashMap<Box<str>, Symbol>,
     sym_to_str: Vec<*const str>,
@@ -17,10 +18,7 @@ struct SymbolTable {
 unsafe impl Send for SymbolTable {}
 
 lazy_static! {
-    static ref SYMBOL_TABLE: Mutex<SymbolTable> = Mutex::new(SymbolTable {
-        str_to_sym: HashMap::new(),
-        sym_to_str: Vec::new(),
-    });
+    static ref SYMBOL_TABLE: Mutex<SymbolTable> = Mutex::default();
 }
 
 impl Symbol {
