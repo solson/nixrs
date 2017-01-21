@@ -539,27 +539,45 @@ mod test {
 
     #[test]
     fn lex_ints() {
-        assert_lex!("0",   ["1:1-1:2" => Int(0)]);
-        assert_lex!("42",  ["1:1-1:3" => Int(42)]);
-        assert_lex!("1 2", ["1:1-1:2" => Int(1), "1:3-1:4" => Int(2)]);
+        assert_lex!("0", [
+            "1:1-1:2" => Int(0),
+        ]);
+        assert_lex!("42", [
+            "1:1-1:3" => Int(42),
+        ]);
+        assert_lex!("1 2", [
+            "1:1-1:2" => Int(1),
+            "1:3-1:4" => Int(2),
+        ]);
     }
 
     #[test]
     fn lex_idents() {
-        assert_lex!("a", ["1:1-1:2" => id("a")]);
-        assert_lex!("b", ["1:1-1:2" => id("b")]);
+        assert_lex!("a", [
+            "1:1-1:2" => Id("a"),
+        ]);
+        assert_lex!("b", [
+            "1:1-1:2" => id("b"),
+        ]);
         assert_lex!("a a b", [
             "1:1-1:2" => id("a"),
             "1:3-1:4" => id("a"),
             "1:5-1:6" => id("b"),
         ]);
-        assert_lex!("foobar", ["1:1-1:7" => id("foobar")]);
+        assert_lex!("foobar", [
+            "1:1-1:7" => id("foobar"),
+        ]);
     }
 
     #[test]
     fn lex_ints_vs_idents() {
-        assert_lex!("a1", ["1:1-1:3" => id("a1")]);
-        assert_lex!("1a", ["1:1-1:2" => Int(1), "1:2-1:3" => id("a")]);
+        assert_lex!("a1", [
+            "1:1-1:3" => id("a1"),
+        ]);
+        assert_lex!("1a", [
+            "1:1-1:2" => Int(1),
+            "1:2-1:3" => id("a"),
+        ]);
     }
 
     #[test]
