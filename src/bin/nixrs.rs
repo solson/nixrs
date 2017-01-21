@@ -24,7 +24,7 @@ fn result_main() -> io::Result<()> {
 
     let input_file = matches.value_of("INPUT").unwrap();
     let mut source = String::new();
-    try!(try!(File::open(input_file)).read_to_string(&mut source));
+    File::open(input_file)?.read_to_string(&mut source)?;
 
     let ctx = EvalContext::new();
     let tokens = Lexer::new(&ctx, input_file, &source);
