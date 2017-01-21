@@ -51,7 +51,7 @@ impl Symbol {
 
 impl fmt::Debug for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}:{}", self.as_str(), self.index)
+        write!(f, "{:?}", self.as_str())
     }
 }
 
