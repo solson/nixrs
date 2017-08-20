@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use regex::{Regex, RegexSet};
 use std::fmt;
 use std::str::Chars;
 
@@ -58,10 +59,8 @@ pub enum TokenKind {
 
     // String-related
     Uri(String),
-    StrPart(String),
-    IndentStrPart(String),
-    Quote,        // "
-    IndentQuote,  // ''
+    StrPart(StringStyle, String),
+    Quote(StringStyle), // " or ''
     DollarBraceL, // ${
 
     // Operators
@@ -111,6 +110,15 @@ pub enum TokenKind {
     KeywordRec,
     KeywordInherit,
     KeywordOr,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum StringStyle {
+    /// A `"`-delimited string.
+    Normal,
+
+    /// A `''`-delimited string, which ignores indentation and leading and trailing whitespace.
+    Indent,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -185,10 +193,19 @@ enum LexerState {
     Normal,
 
     /// When the lexer is inside a string.
-    String,
+    String(StringStyle),
 
     /// When the lexer is in a `${}` interpolation inside a string.
     Interpolation,
+}
+
+impl StringStyle {
+    fn delimiter(self) -> &'static str {
+        match self {
+            StringStyle::Normal => "\"",
+            StringStyle::Indent => "''",
+        }
+    }
 }
 
 impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
@@ -197,9 +214,39 @@ impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
     fn next(&mut self) -> Option<Token> {
         match self.state() {
             LexerState::Normal | LexerState::Interpolation => self.lex_normal(),
-            LexerState::String => self.lex_string_part(),
+            LexerState::String(_) => self.lex_string_part(),
         }
     }
+}
+
+const TOKEN_REGEX_SOURCES: [&str; 7] = [
+    // 0 = identifier
+    r"\A[a-zA-Z_][a-zA-Z0-9_'-]*",
+
+    // 1 = integer
+    r"\A[0-9]+",
+
+    // 2 = float
+    r"\A(([1-9][0-9]*\.[0-9]*)|(0?\.[0-9]+))([Ee][+-]?[0-9]+)?",
+
+    // 3 = regular path
+    r"\A[a-zA-Z0-9._+-]*(/[a-zA-Z0-9._+-]+)+/?",
+
+    // 4 = home path (starts with `~`)
+    r"\A~(/[a-zA-Z0-9._+-]+)+/?",
+
+    // 5 = special path (surrounded by `<>`)
+    r"\A<[a-zA-Z0-9._+-]+(/[a-zA-Z0-9._+-]+)*>",
+
+    // 6 = URI
+    r"\A[a-zA-Z][a-zA-Z0-9+.-]*:[a-zA-Z0-9%/?:@&=+$,_.!~*'-]+",
+];
+
+lazy_static! {
+    static ref TOKEN_REGEX_SET: RegexSet = RegexSet::new(&TOKEN_REGEX_SOURCES).unwrap();
+    static ref TOKEN_REGEXES: Vec<Regex> = TOKEN_REGEX_SOURCES.iter().map(|src| {
+        Regex::new(src).unwrap()
+    }).collect();
 }
 
 impl<'ctx, 'src> Lexer<'ctx, 'src> {
@@ -221,10 +268,49 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
                       self.state() == LexerState::Interpolation);
         let start = self.pos();
 
-        macro_rules! simple { ($kind:ident, $len:expr) => ({
-            self.skip($len);
-            Some(self.spanned(start, self.pos(), TokenKind::$kind))
-        })}
+        macro_rules! simple {
+            ($kind:ident, $len:expr) => ({
+                self.skip($len);
+                Some(self.spanned(start, self.pos(), TokenKind::$kind))
+            })
+        }
+
+        let mut matches: Vec<(usize, &'src str)> = TOKEN_REGEX_SET
+            .matches(self.peek_rest())
+            .iter()
+            .map(|match_index| {
+                let token_regex = &TOKEN_REGEXES[match_index];
+                let token_str = token_regex.find(self.peek_rest()).unwrap().as_str();
+                (match_index, token_str)
+            })
+            .collect();
+
+        // Use the longest match.
+        matches.sort_by_key(|&(_, s)| s.len());
+        if let Some(&(match_index, token_str)) = matches.last() {
+            let token_kind = match match_index {
+                // identifier (or keyword)
+                0 => ident_or_keyword_from_str(token_str),
+
+                // integer
+                // TODO(tsion): Detect and diagnose integer overflow.
+                1 => TokenKind::Int(token_str.parse::<i64>().unwrap()),
+
+                // float
+                2 => panic!("unimplemented: float"),
+
+                // The three kinds of paths.
+                3 | 4 | 5 => TokenKind::Path(Symbol::new(token_str)),
+
+                // URI
+                6 => TokenKind::Uri(String::from(token_str)),
+
+                _ => unreachable!(),
+            };
+
+            self.skip(token_str.len());
+            return Some(self.spanned(start, self.pos(), token_kind));
+        }
 
         let c1 = match self.peek(0) {
             Some(c) => c,
@@ -291,10 +377,17 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             ('.', _) => simple!(Dot, 1),
 
             // The beginning of a string.
-
             ('"', _) => {
-                self.state_stack.push(LexerState::String);
-                simple!(Quote, 1)
+                self.state_stack.push(LexerState::String(StringStyle::Normal));
+                self.skip(1);
+                Some(self.spanned(start, self.pos(), TokenKind::Quote(StringStyle::Normal)))
+            }
+
+            // The beginning of an indent string.
+            ('\'', Some('\'')) => {
+                self.state_stack.push(LexerState::String(StringStyle::Indent));
+                self.skip(2);
+                Some(self.spanned(start, self.pos(), TokenKind::Quote(StringStyle::Normal)))
             }
 
             // If we're lexing inside of a string interpolation, we need to keep track of our depth
@@ -325,28 +418,38 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
                 simple!(BraceR, 1)
             }
 
-            // Identifier and integer tokens.
-
-            (c, _) if is_identifier_start(c) => Some(self.lex_ident_or_keyword()),
-            (c, _) if c.is_digit(10) => Some(self.lex_int()),
-            (c, _) => panic!("unhandled char: {}", c),
+            (c, _) => panic!("unhandled char: {}, at: {}", c, self.pos()),
         }
     }
 
     fn lex_string_part(&mut self) -> Option<Token> {
-        debug_assert_eq!(self.state(), LexerState::String);
+        let string_style = match self.state() {
+            LexerState::String(style) => style,
+            s => panic!("entered lex_string_part in a non-string lexing state: {:?}", s),
+        };
         let start = self.pos();
-
-        if let Some('"') = self.peek(0) {
-            self.skip(1); // Skip over the quote.
-            let _state = self.state_stack.pop(); // Pop the string state.
-            debug_assert_eq!(_state, Some(LexerState::String));
-            return Some(self.spanned(start, self.pos(), TokenKind::Quote));
-        }
+        let delimiter = string_style.delimiter();
 
         let mut chars = String::new();
 
         loop {
+            // Check if we've hit the end of string.
+            if self.peek_starts_with(delimiter) {
+                // Check for `''$`, the escape for `${}` inside a `''`-style string.
+                if string_style == StringStyle::Indent && self.peek(2) == Some('$') {
+                    self.skip(3);
+                    chars.push('$');
+                } else {
+                    // If we lexed some chars before hitting end of string, we'll emit a `StrPart`
+                    // token before re-entering this function to emit the closing `Quote` token.
+                    if !chars.is_empty() { break; }
+
+                    self.skip(delimiter.len());
+                    self.state_stack.pop(); // Pop the string state.
+                    return Some(self.spanned(start, self.pos(), TokenKind::Quote(string_style)));
+                }
+            }
+
             let c1 = match self.peek(0) {
                 Some(c) => c,
                 None => {
@@ -357,7 +460,7 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             let c2 = self.peek(1);
 
             match (c1, c2) {
-                ('\\', Some(c)) => {
+                ('\\', Some(c)) if string_style == StringStyle::Normal => {
                     self.skip(2);
                     chars.push(match c {
                         'n' => '\n',
@@ -366,9 +469,15 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
                         _ => c,
                     });
                 }
-                ('\\', None) => {
+                ('\\', None) if string_style == StringStyle::Normal => {
                     // TODO(solson): Report character escape (or string?) meeting end of file.
                     panic!("character escape hit end of file");
+                }
+
+                ('\'', Some('\''))
+                if string_style == StringStyle::Indent && self.peek(2) == Some('$') => {
+                    self.skip(3);
+                    chars.push('$');
                 }
 
                 ('$', Some('{')) => {
@@ -381,59 +490,18 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
                     }
                 }
 
-                ('"', _) => {
-                    if chars.is_empty() {
-                        self.skip(1); // Skip over the quote.
-                        let _state = self.state_stack.pop(); // Pop the string state.
-                        debug_assert_eq!(_state, Some(LexerState::String));
-                        return Some(self.spanned(start, self.pos(), TokenKind::Quote));
-                    } else {
-                        break;
-                    }
-                }
-
                 // Replace literal \r and \r\n character sequences in multiline strings with \n.
                 ('\r', Some('\n')) => { self.skip(2); chars.push('\n'); }
                 ('\r', _)          => { self.skip(1); chars.push('\n'); }
 
-                _ => { self.skip(1); chars.push(c1); }
+                _ => {
+                    self.skip(1);
+                    chars.push(c1);
+                }
             };
         }
 
-        Some(self.spanned(start, self.pos(), TokenKind::StrPart(chars)))
-    }
-
-    fn lex_ident_or_keyword(&mut self) -> Token {
-        let start = self.pos();
-        let chars = self.chars.as_str();
-        let len = self.chars.take_while_ref(|&c| is_identifier_continue(c)).count();
-        let identifier = &chars[..len];
-
-        let kind = match identifier {
-            "if"      => TokenKind::KeywordIf,
-            "then"    => TokenKind::KeywordThen,
-            "else"    => TokenKind::KeywordElse,
-            "assert"  => TokenKind::KeywordAssert,
-            "with"    => TokenKind::KeywordWith,
-            "let"     => TokenKind::KeywordLet,
-            "in"      => TokenKind::KeywordIn,
-            "rec"     => TokenKind::KeywordRec,
-            "inherit" => TokenKind::KeywordInherit,
-            "or"      => TokenKind::KeywordOr,
-            _         => TokenKind::Id(Symbol::new(identifier)),
-        };
-
-        self.spanned(start, self.pos(), kind)
-    }
-
-    fn lex_int(&mut self) -> Token {
-        let start = self.pos();
-        let chars = self.chars.as_str();
-        let num_digits = self.chars.take_while_ref(|c| c.is_digit(10)).count();
-        let digits = &chars[..num_digits];
-
-        // TODO(tsion): Detect and diagnose integer overflow.
-        self.spanned(start, self.pos(), TokenKind::Int(digits.parse::<i64>().unwrap()))
+        Some(self.spanned(start, self.pos(), TokenKind::StrPart(string_style, chars)))
     }
 
     /// Regexp from the Nix lexer: `[ \t\r\n]+`
@@ -473,8 +541,12 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         }
     }
 
+    fn peek_rest(&self) -> &'src str {
+        self.chars.as_str()
+    }
+
     fn peek_starts_with(&self, s: &str) -> bool {
-        self.chars.as_str().starts_with(s)
+        self.peek_rest().starts_with(s)
     }
 
     fn peek(&self, skip: usize) -> Option<char> {
@@ -490,6 +562,22 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             val: val,
             span: Span { filename: self.filename, start: start, end: end },
         }
+    }
+}
+
+fn ident_or_keyword_from_str(str: &str) -> TokenKind {
+    match str {
+        "if"      => TokenKind::KeywordIf,
+        "then"    => TokenKind::KeywordThen,
+        "else"    => TokenKind::KeywordElse,
+        "assert"  => TokenKind::KeywordAssert,
+        "with"    => TokenKind::KeywordWith,
+        "let"     => TokenKind::KeywordLet,
+        "in"      => TokenKind::KeywordIn,
+        "rec"     => TokenKind::KeywordRec,
+        "inherit" => TokenKind::KeywordInherit,
+        "or"      => TokenKind::KeywordOr,
+        _         => TokenKind::Id(Symbol::new(str)),
     }
 }
 
