@@ -50,6 +50,7 @@ pub type Token = Spanned<TokenKind>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenKind {
     Unknown,
+    Comment(String),
 
     // Basic
     Id(Symbol),
@@ -326,24 +327,13 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         let c2 = self.peek(1);
 
         match (c1, c2) {
-            // Whitespace and comments.
-
             (c, _) if is_whitespace(c) => {
                 self.skip_whitespace();
                 self.lex_normal()
             }
 
-            ('#', _) => {
-                self.skip_line_comment();
-                self.lex_normal()
-            }
-
-            ('/', Some('*')) => {
-                self.skip_long_comment();
-                self.lex_normal()
-            }
-
-            // Various fixed-length symbol tokens.
+            ('#', _) => Some(self.lex_line_comment()),
+            ('/', Some('*')) => Some(self.lex_long_comment()),
 
             ('/', Some('/')) => simple!(Update, 2),
             ('/', _) => simple!(Divide, 1),
@@ -511,27 +501,43 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
     }
 
     /// Regexp from the Nix lexer: `#[^\r\n]*`
-    fn skip_line_comment(&mut self) {
+    fn lex_line_comment(&mut self) -> Token {
         debug_assert_eq!(self.peek(0), Some('#'));
-        self.skip_while(|c| c != '\n' && c != '\r');
+        let start = self.pos();
+        let rest = self.peek_rest();
+        let len = self.skip_while(|c| c != '\n' && c != '\r');
+        let comment_str = &rest[..len];
+        self.spanned(start, self.pos(), TokenKind::Comment(String::from(comment_str)))
     }
 
+    // FIXME(solson): This could be cleaned up a lot with the right abstraction (shouldn't need to
+    // track `len` manually.
     /// Regexp from the Nix lexer: `\/\*([^*]|\*[^\/])*\*\/`
-    fn skip_long_comment(&mut self) {
+    fn lex_long_comment(&mut self) -> Token {
         debug_assert!(self.peek_starts_with("/*"));
+        let start = self.pos();
+        let rest = self.peek_rest();
+        let mut len = 0;
         self.skip(2);
+        len += 2;
+
         while !self.peek_starts_with("*/") {
             if self.peek(0).is_none() {
                 // TODO(tsion): Report unterminated comment meeting end of file.
-                return;
+                panic!("unclosed string hit end of file");
             }
             self.skip(1);
+            len += 1;
         }
         self.skip(2);
+        len += 2;
+
+        let comment_str = &rest[..len];
+        self.spanned(start, self.pos(), TokenKind::Comment(String::from(comment_str)))
     }
 
-    fn skip_while<F>(&mut self, mut f: F) where F: FnMut(char) -> bool {
-        for _ in self.chars.take_while_ref(|&c| f(c)) {}
+    fn skip_while<F>(&mut self, mut f: F) -> usize where F: FnMut(char) -> bool {
+        self.chars.take_while_ref(|&c| f(c)).count()
     }
 
     fn skip(&mut self, count: usize) {
