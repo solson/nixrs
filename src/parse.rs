@@ -36,71 +36,57 @@ impl fmt::Display for Span {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Spanned<T> {
-    pub val: T,
+pub struct Token<'src> {
+    pub kind: TokenKind,
     pub span: Span,
+    pub source: &'src str,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Token kinds
 ////////////////////////////////////////////////////////////////////////////////
 
-pub type Token = Spanned<TokenKind>;
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TokenKind {
-    Unknown,
-    Comment(String),
-
-    // Basic
-    Id(Symbol),
-    Int(i64),
-    Float(f64),
-    Path(Symbol),
-
-    // String-related
-    Uri(String),
-    StrPart(StringStyle, String),
+    Comment,
+    Identifier,
+    Integer,
+    Float,
+    Path,
+    Uri,
+    StrPart(StringStyle),
     Quote(StringStyle), // " or ''
-    DollarBraceL, // ${
-
-    // Operators
-    Mult,       // *
-    Minus,      // -
-    Plus,       // +
-    Divide,     // /
-    Less,       // <
-    Greater,    // >
-    LessEq,     // <=
-    GreaterEq,  // >=
-    Assign,     // =
-    Equals,     // ==
-    NotEquals,  // !=
-    And,        // &&
-    Or,         // ||
-    Implies,    // ->
-    Not,        // !
-    Update,     // //
-    Concat,     // ++
-
-    // Other syntax
-    At,         // @
-    Comma,      // ,
-    Dot,        // .
-    Ellipsis,   // ...
-    Question,   // ?
-    Colon,      // :
-    Semicolon,  // ;
-
-    // Delimiters
-    ParenL,     // (
-    ParenR,     // )
-    BracketL,   // [
-    BracketR,   // ]
-    BraceL,     // {
-    BraceR,     // }
-
-    // Keywords
+    DollarBraceL,       // ${
+    Mult,               // *
+    Minus,              // -
+    Plus,               // +
+    Divide,             // /
+    Less,               // <
+    Greater,            // >
+    LessEq,             // <=
+    GreaterEq,          // >=
+    Assign,             // =
+    Equals,             // ==
+    NotEquals,          // !=
+    And,                // &&
+    Or,                 // ||
+    Implies,            // ->
+    Not,                // !
+    Update,             // //
+    Concat,             // ++
+    At,                 // @
+    Comma,              // ,
+    Dot,                // .
+    Ellipsis,           // ...
+    Question,           // ?
+    Colon,              // :
+    Semicolon,          // ;
+    ParenL,             // (
+    ParenR,             // )
+    BracketL,           // [
+    BracketR,           // ]
+    BraceL,             // {
+    BraceR,             // }
     KeywordIf,
     KeywordThen,
     KeywordElse,
@@ -162,16 +148,11 @@ impl<'a> Iterator for CharsPos<'a> {
 // Character classification
 ////////////////////////////////////////////////////////////////////////////////
 
-fn is_identifier_start(c: char) -> bool {
-    match c { 'a' ... 'z' | 'A' ... 'Z' | '_' => true, _ => false }
-}
-
-fn is_identifier_continue(c: char) -> bool {
-    match c { 'a' ... 'z' | 'A' ... 'Z' | '_' | '0' ... '9' | '\'' | '-' => true, _ => false }
-}
-
 fn is_whitespace(c: char) -> bool {
-    match c { ' ' | '\t' | '\r' | '\n' => true, _ => false }
+    match c {
+        ' ' | '\t' | '\r' | '\n' => true,
+        _ => false,
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -186,6 +167,14 @@ pub struct Lexer<'ctx, 'src> {
     /// A record of the levels of nesting the lexer is currently in. The last state is the most
     /// deeply nested. An empty stack implies the lexer is at the normal top-level.
     state_stack: Vec<LexerState>,
+
+    /// The line/column location of the start of the token currently being scanned.
+    token_start_pos: Pos,
+
+    /// The position in the source string of the token currently being scanned, as a slice
+    /// extending to the end of the source string. Once the end of the token is found, this is
+    /// sliced off at that point to give just the slice of the string containing the token.
+    token_start_str: &'src str,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -210,9 +199,9 @@ impl StringStyle {
 }
 
 impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
-    type Item = Token;
+    type Item = Token<'src>;
 
-    fn next(&mut self) -> Option<Token> {
+    fn next(&mut self) -> Option<Token<'src>> {
         match self.state() {
             LexerState::Normal | LexerState::Interpolation => self.lex_normal(),
             LexerState::String(_) => self.lex_string_part(),
@@ -252,9 +241,12 @@ lazy_static! {
 
 impl<'ctx, 'src> Lexer<'ctx, 'src> {
     pub fn new(ctx: &'ctx EvalContext, filename: &str, source: &'src str) -> Self {
+        let chars = CharsPos::new(source.chars());
         Lexer {
-            ctx: ctx,
-            chars: CharsPos::new(source.chars()),
+            ctx,
+            token_start_pos: chars.pos,
+            token_start_str: source,
+            chars,
             filename: Symbol::new(filename),
             state_stack: Vec::new(),
         }
@@ -264,15 +256,15 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         *self.state_stack.last().unwrap_or(&LexerState::Normal)
     }
 
-    fn lex_normal(&mut self) -> Option<Token> {
+    fn lex_normal(&mut self) -> Option<Token<'src>> {
         debug_assert!(self.state() == LexerState::Normal ||
                       self.state() == LexerState::Interpolation);
-        let start = self.pos();
+        self.start_token();
 
         macro_rules! simple {
             ($kind:ident, $len:expr) => ({
                 self.skip($len);
-                Some(self.spanned(start, self.pos(), TokenKind::$kind))
+                Some(self.finish_token(TokenKind::$kind))
             })
         }
 
@@ -290,27 +282,16 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         matches.sort_by_key(|&(_, s)| s.len());
         if let Some(&(match_index, token_str)) = matches.last() {
             let token_kind = match match_index {
-                // identifier (or keyword)
                 0 => ident_or_keyword_from_str(token_str),
-
-                // integer
-                // TODO(tsion): Detect and diagnose integer overflow.
-                1 => TokenKind::Int(token_str.parse::<i64>().unwrap()),
-
-                // float
-                2 => panic!("unimplemented: float"),
-
-                // The three kinds of paths.
-                3 | 4 | 5 => TokenKind::Path(Symbol::new(token_str)),
-
-                // URI
-                6 => TokenKind::Uri(String::from(token_str)),
-
+                1 => TokenKind::Integer,
+                2 => TokenKind::Float,
+                3 | 4 | 5 => TokenKind::Path,
+                6 => TokenKind::Uri,
                 _ => unreachable!(),
             };
 
             self.skip(token_str.len());
-            return Some(self.spanned(start, self.pos(), token_kind));
+            return Some(self.finish_token(token_kind));
         }
 
         let c1 = match self.peek(0) {
@@ -370,14 +351,14 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             ('"', _) => {
                 self.state_stack.push(LexerState::String(StringStyle::Normal));
                 self.skip(1);
-                Some(self.spanned(start, self.pos(), TokenKind::Quote(StringStyle::Normal)))
+                Some(self.finish_token(TokenKind::Quote(StringStyle::Normal)))
             }
 
             // The beginning of an indent string.
             ('\'', Some('\'')) => {
                 self.state_stack.push(LexerState::String(StringStyle::Indent));
                 self.skip(2);
-                Some(self.spanned(start, self.pos(), TokenKind::Quote(StringStyle::Normal)))
+                Some(self.finish_token(TokenKind::Quote(StringStyle::Indent)))
             }
 
             // If we're lexing inside of a string interpolation, we need to keep track of our depth
@@ -412,15 +393,13 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         }
     }
 
-    fn lex_string_part(&mut self) -> Option<Token> {
+    fn lex_string_part(&mut self) -> Option<Token<'src>> {
         let string_style = match self.state() {
             LexerState::String(style) => style,
             s => panic!("entered lex_string_part in a non-string lexing state: {:?}", s),
         };
-        let start = self.pos();
+        self.start_token();
         let delimiter = string_style.delimiter();
-
-        let mut chars = String::new();
 
         loop {
             // Check if we've hit the end of string.
@@ -428,15 +407,16 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
                 // Check for `''$`, the escape for `${}` inside a `''`-style string.
                 if string_style == StringStyle::Indent && self.peek(2) == Some('$') {
                     self.skip(3);
-                    chars.push('$');
                 } else {
                     // If we lexed some chars before hitting end of string, we'll emit a `StrPart`
                     // token before re-entering this function to emit the closing `Quote` token.
-                    if !chars.is_empty() { break; }
+                    if self.token_start_pos != self.pos() {
+                        break;
+                    }
 
                     self.skip(delimiter.len());
                     self.state_stack.pop(); // Pop the string state.
-                    return Some(self.spanned(start, self.pos(), TokenKind::Quote(string_style)));
+                    return Some(self.finish_token(TokenKind::Quote(string_style)));
                 }
             }
 
@@ -450,15 +430,8 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             let c2 = self.peek(1);
 
             match (c1, c2) {
-                ('\\', Some(c)) if string_style == StringStyle::Normal => {
-                    self.skip(2);
-                    chars.push(match c {
-                        'n' => '\n',
-                        'r' => '\r',
-                        't' => '\t',
-                        _ => c,
-                    });
-                }
+                ('\\', Some(_)) if string_style == StringStyle::Normal => self.skip(2),
+
                 ('\\', None) if string_style == StringStyle::Normal => {
                     // TODO(solson): Report character escape (or string?) meeting end of file.
                     panic!("character escape hit end of file");
@@ -467,31 +440,27 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
                 ('\'', Some('\''))
                 if string_style == StringStyle::Indent && self.peek(2) == Some('$') => {
                     self.skip(3);
-                    chars.push('$');
                 }
 
                 ('$', Some('{')) => {
-                    if chars.is_empty() {
+                    if self.token_start_pos == self.pos() {
                         self.skip(2); // Skip over the '${'.
                         self.state_stack.push(LexerState::Interpolation);
-                        return Some(self.spanned(start, self.pos(), TokenKind::DollarBraceL));
+                        return Some(self.finish_token(TokenKind::DollarBraceL));
                     } else {
                         break;
                     }
                 }
 
                 // Replace literal \r and \r\n character sequences in multiline strings with \n.
-                ('\r', Some('\n')) => { self.skip(2); chars.push('\n'); }
-                ('\r', _)          => { self.skip(1); chars.push('\n'); }
+                ('\r', Some('\n')) => self.skip(2),
+                ('\r', _)          => self.skip(1),
 
-                _ => {
-                    self.skip(1);
-                    chars.push(c1);
-                }
+                _ => self.skip(1),
             };
         }
 
-        Some(self.spanned(start, self.pos(), TokenKind::StrPart(string_style, chars)))
+        Some(self.finish_token(TokenKind::StrPart(string_style)))
     }
 
     /// Regexp from the Nix lexer: `[ \t\r\n]+`
@@ -501,25 +470,18 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
     }
 
     /// Regexp from the Nix lexer: `#[^\r\n]*`
-    fn lex_line_comment(&mut self) -> Token {
+    fn lex_line_comment(&mut self) -> Token<'src> {
         debug_assert_eq!(self.peek(0), Some('#'));
-        let start = self.pos();
-        let rest = self.peek_rest();
-        let len = self.skip_while(|c| c != '\n' && c != '\r');
-        let comment_str = &rest[..len];
-        self.spanned(start, self.pos(), TokenKind::Comment(String::from(comment_str)))
+        self.start_token();
+        self.skip_while(|c| c != '\n' && c != '\r');
+        self.finish_token(TokenKind::Comment)
     }
 
-    // FIXME(solson): This could be cleaned up a lot with the right abstraction (shouldn't need to
-    // track `len` manually.
     /// Regexp from the Nix lexer: `\/\*([^*]|\*[^\/])*\*\/`
-    fn lex_long_comment(&mut self) -> Token {
+    fn lex_long_comment(&mut self) -> Token<'src> {
         debug_assert!(self.peek_starts_with("/*"));
-        let start = self.pos();
-        let rest = self.peek_rest();
-        let mut len = 0;
+        self.start_token();
         self.skip(2);
-        len += 2;
 
         while !self.peek_starts_with("*/") {
             if self.peek(0).is_none() {
@@ -527,13 +489,10 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
                 panic!("unclosed string hit end of file");
             }
             self.skip(1);
-            len += 1;
         }
         self.skip(2);
-        len += 2;
 
-        let comment_str = &rest[..len];
-        self.spanned(start, self.pos(), TokenKind::Comment(String::from(comment_str)))
+        self.finish_token(TokenKind::Comment)
     }
 
     fn skip_while<F>(&mut self, mut f: F) -> usize where F: FnMut(char) -> bool {
@@ -563,10 +522,31 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         self.chars.pos
     }
 
-    fn spanned<T>(&self, start: Pos, end: Pos, val: T) -> Spanned<T> {
-        Spanned {
-            val: val,
-            span: Span { filename: self.filename, start: start, end: end },
+    /// Record the start position of a token, to be paired with `finish_token`.
+    fn start_token(&mut self) {
+        self.token_start_pos = self.pos();
+        self.token_start_str = self.chars.as_str();
+    }
+
+    /// Generate a token starting at the start position from the most recent `start_token` call and
+    /// ending at the current position.
+    fn finish_token(&self, kind: TokenKind) -> Token<'src> {
+        // This slightly convoluted code takes two slices from certain positions in the source to
+        // the end of the source and figures out the distance between their starting positions by
+        // subtracting their distances to the end of the source.
+        let start_len = self.token_start_str.len();
+        let end_len = self.chars.as_str().len();
+        let len = start_len - end_len;
+        let source = &self.token_start_str[..len];
+
+        Token {
+            kind,
+            span: Span {
+                filename: self.filename,
+                start: self.token_start_pos,
+                end: self.pos(),
+            },
+            source,
         }
     }
 }
@@ -583,11 +563,11 @@ fn ident_or_keyword_from_str(str: &str) -> TokenKind {
         "rec"     => TokenKind::KeywordRec,
         "inherit" => TokenKind::KeywordInherit,
         "or"      => TokenKind::KeywordOr,
-        _         => TokenKind::Id(Symbol::new(str)),
+        _         => TokenKind::Identifier,
     }
 }
 
-pub fn lex(ctx: &EvalContext, filename: &str, source: &str) -> Vec<Token> {
+pub fn lex<'src>(ctx: &EvalContext, filename: &str, source: &'src str) -> Vec<Token<'src>> {
     Lexer::new(ctx, filename, source).collect()
 }
 
