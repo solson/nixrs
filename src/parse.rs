@@ -404,20 +404,28 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
         loop {
             // Check if we've hit the end of string.
             if self.peek_starts_with(delimiter) {
-                // Check for `''$`, the escape for `${}` inside a `''`-style string.
-                if string_style == StringStyle::Indent && self.peek(2) == Some('$') {
-                    self.skip(3);
-                } else {
-                    // If we lexed some chars before hitting end of string, we'll emit a `StrPart`
-                    // token before re-entering this function to emit the closing `Quote` token.
-                    if self.token_start_pos != self.pos() {
-                        break;
+                if string_style == StringStyle::Indent {
+                    match (self.peek(2), self.peek(3)) {
+                        (Some('$'), _) => { self.skip(3); continue; }
+                        (Some('\''), _) => { self.skip(3); continue; }
+                        (Some('\\'), Some(_)) => { self.skip(4); continue; }
+                        (Some('\\'), None) => {
+                            // TODO(solson): Report character escape in string meeting end of file.
+                            panic!("character escape hit end of file");
+                        }
+                        _ => {}
                     }
-
-                    self.skip(delimiter.len());
-                    self.state_stack.pop(); // Pop the string state.
-                    return Some(self.finish_token(TokenKind::Quote(string_style)));
                 }
+
+                // If we lexed some chars before hitting end of string, we'll emit a `StrPart`
+                // token before re-entering this function to emit the closing `Quote` token.
+                if self.token_start_pos != self.pos() {
+                    break;
+                }
+
+                self.skip(delimiter.len());
+                self.state_stack.pop(); // Pop the string state.
+                return Some(self.finish_token(TokenKind::Quote(string_style)));
             }
 
             let c1 = match self.peek(0) {
