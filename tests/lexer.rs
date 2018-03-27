@@ -4,7 +4,7 @@ extern crate nixrs;
 extern crate pretty_assertions;
 
 use nixrs::context::EvalContext;
-use nixrs::parse::Lexer;
+use nixrs::lex::Lexer;
 use std::io::{self, Read};
 use std::fmt;
 use std::fs::File;

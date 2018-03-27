@@ -3,7 +3,7 @@ extern crate nixrs;
 
 use clap::{Arg, App};
 use nixrs::context::EvalContext;
-use nixrs::parse::Lexer;
+use nixrs::lex::Lexer;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
