@@ -8,3 +8,7 @@ clap = "2.1.2"
 itertools = "0.4.11"
 lazy_static = "0.2.1"
 regex = "0.2.2"
+
+[dev-dependencies]
+glob = "0.2.11"
+pretty_assertions = "0.5.1"

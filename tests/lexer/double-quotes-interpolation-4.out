@@ -1,0 +1,6 @@
+[1:1-1:2] (Quote(Normal)) "\""
+[1:2-1:5] (StrPart(Normal)) "foo"
+[1:5-1:7] (DollarBraceL) "${"
+[1:7-1:8] (BraceR) "}"
+[1:8-1:11] (StrPart(Normal)) "bar"
+[1:11-1:12] (Quote(Normal)) "\""

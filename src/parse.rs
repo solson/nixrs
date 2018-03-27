@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use regex::{Regex, RegexSet};
-use std::fmt;
+use std::fmt::{self, Write};
 use std::str::Chars;
 
 use context::EvalContext;
@@ -557,6 +557,18 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
             source,
         }
     }
+
+    // This function is used for lexer tests, so if you change the format of it, you must change
+    // the format of all the lexer tests (in tests/lexer/*.out).
+    pub fn debug_string(self) -> String {
+        let mut out = String::new();
+        for Token { kind, span, source } in self {
+            let Span { start: s, end: e, .. } = span;
+            write!(out, "[{}:{}-{}:{}] ({:?}) {:?}\n",
+                s.line, s.column, e.line, e.column, kind, source).unwrap();
+        }
+        out
+    }
 }
 
 fn ident_or_keyword_from_str(str: &str) -> TokenKind {
@@ -572,174 +584,5 @@ fn ident_or_keyword_from_str(str: &str) -> TokenKind {
         "inherit" => TokenKind::KeywordInherit,
         "or"      => TokenKind::KeywordOr,
         _         => TokenKind::Identifier,
-    }
-}
-
-pub fn lex<'src>(ctx: &EvalContext, filename: &str, source: &'src str) -> Vec<Token<'src>> {
-    Lexer::new(ctx, filename, source).collect()
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Tests
-////////////////////////////////////////////////////////////////////////////////
-
-#[cfg(test)]
-mod test {
-    use context::EvalContext;
-    use parse::{Lexer, TokenKind};
-    use parse::TokenKind::*;
-    use symbol::Symbol;
-
-    ////////////////////////////////////////////////////////////////////////////////
-    // Helper functions
-    ////////////////////////////////////////////////////////////////////////////////
-
-    macro_rules! assert_lex {
-        ($src:expr, [ $($span:expr => $token:expr),* $(,)* ]) => ({
-            let expected = [ $(($token, String::from($span))),* ];
-            assert_eq!(lex($src), expected);
-        })
-    }
-
-    fn lex(src: &str) -> Vec<(TokenKind, String)> {
-        Lexer::new(&EvalContext::new(), "<test>", src)
-            .map(|t| (t.val, t.span.to_string()))
-            .collect()
-    }
-
-    fn id(name: &str) -> TokenKind {
-        Id(Symbol::new(name))
-    }
-
-    fn str_part(s: &str) -> TokenKind {
-        StrPart(String::from(s))
-    }
-
-    ////////////////////////////////////////////////////////////////////////////////
-    // Lexer tests
-    ////////////////////////////////////////////////////////////////////////////////
-
-    #[test]
-    fn lex_ints() {
-        assert_lex!("0", [
-            "1:1-1:2" => Int(0),
-        ]);
-        assert_lex!("42", [
-            "1:1-1:3" => Int(42),
-        ]);
-        assert_lex!("1 2", [
-            "1:1-1:2" => Int(1),
-            "1:3-1:4" => Int(2),
-        ]);
-    }
-
-    #[test]
-    fn lex_idents() {
-        assert_lex!("a", [
-            "1:1-1:2" => Id("a"),
-        ]);
-        assert_lex!("b", [
-            "1:1-1:2" => id("b"),
-        ]);
-        assert_lex!("a a b", [
-            "1:1-1:2" => id("a"),
-            "1:3-1:4" => id("a"),
-            "1:5-1:6" => id("b"),
-        ]);
-        assert_lex!("foobar", [
-            "1:1-1:7" => id("foobar"),
-        ]);
-    }
-
-    #[test]
-    fn lex_ints_vs_idents() {
-        assert_lex!("a1", [
-            "1:1-1:3" => id("a1"),
-        ]);
-        assert_lex!("1a", [
-            "1:1-1:2" => Int(1),
-            "1:2-1:3" => id("a"),
-        ]);
-    }
-
-    #[test]
-    fn lex_double_quote() {
-        assert_lex!(r#""""#, [
-            "1:1-1:2" => Quote,
-            "1:2-1:3" => Quote,
-        ]);
-        assert_lex!(r#"" ""#, [
-            "1:1-1:2" => Quote,
-            "1:2-1:3" => str_part(" "),
-            "1:3-1:4" => Quote,
-        ]);
-        assert_lex!(r#""\a\b\c\\\"\n\r\t\${}""#, [
-            "1:1-1:2"   => Quote,
-            "1:2-1:22"  => str_part("abc\\\"\n\r\t${}"),
-            "1:22-1:23" => Quote,
-        ]);
-        assert_lex!(r#""foobar""#, [
-            "1:1-1:2" => Quote,
-            "1:2-1:8" => str_part("foobar"),
-            "1:8-1:9" => Quote,
-        ]);
-
-        // Literal newlines and carriage returns to test normalization to newlines.
-        // FIXME(solson): Should the stray \r get counted as a line break for spans? That would
-        // make this end up on line 5 rather than line 4.
-        assert_lex!("\"foo\n \r \n \r\n bar\"", [
-            "1:1-1:2" => Quote,
-            "1:2-4:5" => str_part("foo\n \n \n \n bar"),
-            "4:5-4:6" => Quote,
-        ]);
-    }
-
-    #[test]
-    fn lex_double_quote_interpolation() {
-        assert_lex!(r#""${}""#, [
-            "1:1-1:2" => Quote,
-            "1:2-1:4" => DollarBraceL,
-            "1:4-1:5" => BraceR,
-            "1:5-1:6" => Quote,
-        ]);
-        assert_lex!(r#""foo${}""#, [
-            "1:1-1:2" => Quote,
-            "1:2-1:5" => str_part("foo"),
-            "1:5-1:7" => DollarBraceL,
-            "1:7-1:8" => BraceR,
-            "1:8-1:9" => Quote,
-        ]);
-        assert_lex!(r#""${}bar""#, [
-            "1:1-1:2" => Quote,
-            "1:2-1:4" => DollarBraceL,
-            "1:4-1:5" => BraceR,
-            "1:5-1:8" => str_part("bar"),
-            "1:8-1:9" => Quote,
-        ]);
-        assert_lex!(r#""foo${}bar""#, [
-            "1:1-1:2" => Quote,
-            "1:2-1:5" => str_part("foo"),
-            "1:5-1:7" => DollarBraceL,
-            "1:7-1:8" => BraceR,
-            "1:8-1:11" => str_part("bar"),
-            "1:11-1:12" => Quote,
-        ]);
-    }
-
-    #[test]
-    fn lex_whitespace_and_comments() {
-        assert_lex!("", []);
-        assert_lex!("/* just a comment */", []);
-        assert_lex!("\n\n\t\r\n # comments and\n /* whitespace\n don't /* matter */\n\n\n", []);
-        assert_lex!("\n  1\n13 \n 42\n", [
-            "2:3-2:4" => Int(1),
-            "3:1-3:3" => Int(13),
-            "4:2-4:4" => Int(42),
-        ]);
-        assert_lex!("# line comment\n  1 ### lex this please\n13 \n 42\n# end of file", [
-            "2:3-2:4" => Int(1),
-            "3:1-3:3" => Int(13),
-            "4:2-4:4" => Int(42),
-        ]);
     }
 }

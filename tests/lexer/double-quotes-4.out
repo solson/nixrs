@@ -1,0 +1,3 @@
+[1:1-1:2] (Quote(Normal)) "\""
+[1:2-1:8] (StrPart(Normal)) "foobar"
+[1:8-1:9] (Quote(Normal)) "\""

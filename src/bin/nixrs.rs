@@ -3,7 +3,7 @@ extern crate nixrs;
 
 use clap::{Arg, App};
 use nixrs::context::EvalContext;
-use nixrs::parse::{Lexer, Span, Token};
+use nixrs::parse::Lexer;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -28,12 +28,7 @@ fn result_main() -> io::Result<()> {
 
     let ctx = EvalContext::new();
     let lexer = Lexer::new(&ctx, input_file, &source);
-
-    for Token { kind, span, source } in lexer {
-        let Span { start: s, end: e, .. } = span;
-        println!("[{:0>3}:{:0>2}-{:0>3}:{:0>2}] ({:?}) {:?}",
-            s.line, s.column, e.line, e.column, kind, source);
-    }
+    println!("{}", lexer.debug_string());
 
     Ok(())
 }
