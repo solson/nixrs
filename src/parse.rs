@@ -160,7 +160,7 @@ fn is_whitespace(c: char) -> bool {
 ////////////////////////////////////////////////////////////////////////////////
 
 pub struct Lexer<'ctx, 'src> {
-    ctx: &'ctx EvalContext,
+    _ctx: &'ctx EvalContext,
     chars: CharsPos<'src>,
     filename: Symbol,
 
@@ -243,7 +243,7 @@ impl<'ctx, 'src> Lexer<'ctx, 'src> {
     pub fn new(ctx: &'ctx EvalContext, filename: &str, source: &'src str) -> Self {
         let chars = CharsPos::new(source.chars());
         Lexer {
-            ctx,
+            _ctx: ctx,
             token_start_pos: chars.pos,
             token_start_str: source,
             chars,
