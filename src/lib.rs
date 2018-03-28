@@ -5,4 +5,5 @@ extern crate regex;
 
 pub mod context;
 pub mod lex;
+pub mod parse;
 pub mod symbol;
