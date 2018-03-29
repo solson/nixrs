@@ -10,7 +10,7 @@ use symbol::Symbol;
 // Token positions and spans
 ////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct Pos {
     pub column: usize,
     pub line: usize,
@@ -584,5 +584,24 @@ fn ident_or_keyword_from_str(str: &str) -> TokenKind {
         "inherit" => TokenKind::KeywordInherit,
         "or"      => TokenKind::KeywordOr,
         _         => TokenKind::Identifier,
+    }
+}
+
+pub mod lalrpop {
+    use super::{Pos, TokenKind};
+
+    pub struct Lexer<'ctx, 'src>(pub super::Lexer<'ctx, 'src>);
+
+    #[derive(Debug)]
+    pub enum LexerError {}
+
+    impl<'ctx, 'src> Iterator for Lexer<'ctx, 'src> {
+        type Item = Result<(Pos, TokenKind, Pos), LexerError>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next().map(|token| {
+                Ok((token.span.start, token.kind, token.span.end))
+            })
+        }
     }
 }

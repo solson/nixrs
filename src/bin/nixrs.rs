@@ -3,8 +3,8 @@ extern crate nixrs;
 
 use clap::{Arg, App};
 use nixrs::context::EvalContext;
-use nixrs::lex::Lexer;
-use nixrs::parse::Parser;
+use nixrs::lex;
+use nixrs::parse;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -27,10 +27,17 @@ fn result_main() -> io::Result<()> {
     let mut source = String::new();
     File::open(input_file)?.read_to_string(&mut source)?;
 
-    let ctx = EvalContext::new();
-    let lexer = Lexer::new(&ctx, input_file, &source);
-    let mut parser = Parser::new(lexer);
-    println!("{:?}", parser.parse_expr());
+    // let ctx = EvalContext::new();
+    // let lexer = lex::Lexer::new(&ctx, input_file, &source);
+    // let lalrpop_lexer = lex::lalrpop::Lexer(lexer);
+    // let parser = parse::ExprParser::new();
+    // let ast = parser.parse(lalrpop_lexer).unwrap();
+    let parser = parse::ExprParser::new();
+    let ast = parser.parse(&source).unwrap();
+    println!("{:?}", ast);
+
+    // let mut parser = Parser::new(lexer);
+    // println!("{:?}", parser.parse_expr());
     // println!("{}", lexer.debug_string());
 
     Ok(())

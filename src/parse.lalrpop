@@ -1,0 +1,204 @@
+use ast::Expr;
+use lex;
+use symbol::Symbol;
+
+grammar;
+
+pub Expr: String = {
+    ExprFunction,
+};
+
+pub ExprFunction: String = {
+    <i:ID> ":" <e:ExprFunction> =>
+        format!("{}: {}", i, e),
+
+    "{" <f:Formals> "}" ":" <e:ExprFunction> =>
+        format!("{{ {} }}: {}", f, e),
+
+    "{" <f:Formals> "}" "@" <i:ID> ":" <e:ExprFunction> =>
+        format!("{{ {} }} @ {}: {}", f, i, e),
+
+    <i:ID> "@" "{" <f:Formals> "}" ":" <e:ExprFunction> =>
+        format!("{} @ {{ {} }}: {}", i, f, e),
+
+    "assert" <e1:Expr> ";" <e2:ExprFunction> =>
+        format!("assert {}; {}", e1, e2),
+
+    "with" <e1:Expr> ";" <e2:ExprFunction> =>
+        format!("with {}; {}", e1, e2),
+
+    "let" <b:Binds> "in" <e:ExprFunction> =>
+        format!("let {} in {}", b, e),
+
+    ExprIf,
+};
+
+pub ExprIf: String = {
+    "if" <e1:Expr> "then" <e2:Expr> "else" <e3:Expr> =>
+        format!("if {} then {} else {}", e1, e2, e3),
+
+    ExprOp,
+};
+
+pub ExprOp: String = {
+    // TODO: copy expr_op from nix's parser.y and figure out how to do precedence in LALRPOP
+
+    ExprApp,
+};
+
+pub ExprApp: String = {
+    <e1:ExprApp> <e2:ExprSelect> =>
+        format!("({}) {}", e1, e2),
+
+    ExprSelect,
+};
+
+pub ExprSelect: String = {
+    // <e:ExprSimple> "." <a:AttrPath> =>
+    //     format!("({}).{}", e, a),
+
+    // <e1:ExprSimple> "." <a:AttrPath> "or" <e2:ExprSelect> =>
+    //     format!("({}).{} or {}", e1, a, e2),
+
+    // Quoting Nix's parser.y: "Backwards compatability: because Nixpkgs has rarely used function
+    // named `or`, allow stuff like `map or [..]`."
+    //
+    // Thus, we treat this case like a function application expression passing a variable named
+    // "or" (which is otherwise usually treated as a keyword).
+    <e:ExprSimple> "or" =>
+        format!("({}) or", e),
+
+    ExprSimple,
+};
+
+pub ExprSimple: String = {
+    <i:ID> => {
+        if i == "__curPos" {
+            // TODO: make a special Expr::Position node, like in Nix?
+            format!("__curPos")
+        } else {
+            format!("{}", i)
+        }
+    },
+
+    <n:INT> => format!("{}", n),
+    <f:FLOAT> => format!("{}", f),
+
+    // "\"" <StringParts> "\"",
+
+    // "''" <IndentStringParts> "''" => unimplemented!("indent strings"),
+
+    // TODO: the rest of expr_simple from Nix's parser.y (paths)
+
+    <u:URI> => format!("{}", u),
+
+    "(" <Expr> ")",
+
+    "let" "{" <b:Binds> "}" =>
+        format!("let {{ {} }}", b),
+
+    "rec" "{" <b:Binds> "}" =>
+        format!("rec {{ {} }}", b),
+
+    "{" <b:Binds> "}" =>
+        format!("{{ {} }}", b),
+
+    "[" <ExprList> "]",
+};
+
+pub Binds: String = {
+    <b:Binds> <a:AttrPath> "=" <e:Expr> ";" =>
+        format!("{} {} = {};", b, a, e),
+
+    <b:Binds> "inherit" <a:Attrs> ";" =>
+        format!("{} inherit {};", b, a),
+
+    <b:Binds> "inherit" "(" <e:Expr> ")" <a:Attrs> ";" =>
+        format!("{} inherit ({}) {};", b, e, a),
+
+    => format!(""),
+};
+
+pub Attrs: String = {
+    <as_:Attrs> <a:Attr> => format!("{} {}", as_, a),
+    <as_:Attrs> <a:StringAttr> => format!("{} {}", as_, a),
+    => format!(""),
+};
+
+pub AttrPath: String = {
+    <p:AttrPath> "." <a:Attr> =>
+        format!("{}.{}", p, a),
+
+    <p:AttrPath> "." <a:StringAttr> =>
+        format!("{}.{}", p, a),
+
+    <a:Attr> =>
+        format!("{}", a),
+
+    <a:StringAttr> =>
+        format!("{}", a),
+};
+
+pub Attr: String = {
+    <i:ID> => format!("{}", i),
+    "or" => format!("or"),
+};
+
+pub StringAttr: String = {
+    // "\"" <StringParts> "\"",
+    "${" <Expr> "}",
+};
+
+pub ExprList: String = {
+    <l:ExprList> <e:ExprSelect> => format!("{} {}", l, e),
+    => format!(""),
+};
+
+pub Formals: String = {
+    <f:Formal> "," <fs:Formals> => format!("{}, {}", f, fs),
+    <f:Formal> => format!("{}", f),
+    => format!(""),
+    "..." => format!("..."),
+};
+
+pub Formal: String = {
+    <i:ID> => format!("{}", i),
+    <i:ID> "?" <e:Expr> => format!("{} ? {}", i, e),
+};
+
+match {
+    r"[a-zA-z_][a-zA-Z0-9_'-]*" => ID,
+    r"[0-9]+" => INT,
+    r"(([1-9][0-9]*\.[0-9]*)|(0?\.[0-9]+))([Ee][+-]?[0-9]+)?" => FLOAT,
+    r"[a-zA-Z0-9._+-]*(/[a-zA-Z0-9._+-]+)+/?" => PATH,
+    r"~(/[a-zA-Z0-9._+-]+)+/?" => HPATH,
+    r"<[a-zA-Z0-9._+-]+(/[a-zA-Z0-9._+-]+)*>" => SPATH,
+    r"[a-zA-Z][a-zA-Z0-9+.-]*:[a-zA-Z0-9%/?:@&=+$,_.!~*'-]+" => URI,
+
+    "assert",
+    "with",
+    "let",
+    "rec",
+    "in",
+    "if",
+    "then",
+    "else",
+    "or",
+    "inherit",
+
+    ":",
+    ";",
+    "{",
+    "}",
+    "(",
+    ")",
+    "[",
+    "]",
+    ",",
+    "...",
+    "?",
+    "@",
+    "=",
+    ".",
+    "${",
+}
