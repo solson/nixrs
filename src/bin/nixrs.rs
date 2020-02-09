@@ -2,8 +2,6 @@ extern crate clap;
 extern crate nixrs;
 
 use clap::{Arg, App};
-use nixrs::context::EvalContext;
-use nixrs::lex;
 use nixrs::parse;
 use std::fs::File;
 use std::io;

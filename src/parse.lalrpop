@@ -8,18 +8,24 @@ pub Expr: String = {
     ExprFunction,
 };
 
-pub ExprFunction: String = {
+ExprFunction: String = {
     <i:ID> ":" <e:ExprFunction> =>
         format!("{}: {}", i, e),
 
-    "{" <f:Formals> "}" ":" <e:ExprFunction> =>
-        format!("{{ {} }}: {}", f, e),
+    // "{" <f:Formals> "}" ":" <e:ExprFunction> =>
+    //     format!("{{ {} }}: {}", f, e),
 
-    "{" <f:Formals> "}" "@" <i:ID> ":" <e:ExprFunction> =>
-        format!("{{ {} }} @ {}: {}", f, i, e),
+    // "{" <f:Formals> "}" "@" <i:ID> ":" <e:ExprFunction> =>
+    //     format!("{{ {} }} @ {}: {}", f, i, e),
 
-    <i:ID> "@" "{" <f:Formals> "}" ":" <e:ExprFunction> =>
-        format!("{} @ {{ {} }}: {}", i, f, e),
+    <a:FunctionArg> ":" <e:ExprFunction> =>
+        format!("{}: {}", a, e),
+
+    <a:FunctionArg> "@" <i:ID> ":" <e:ExprFunction> =>
+        format!("{} @ {}: {}", a, i, e),
+
+    <i:ID> "@" <a:FunctionArg> ":" <e:ExprFunction> =>
+        format!("{} @ {}: {}", i, a, e),
 
     "assert" <e1:Expr> ";" <e2:ExprFunction> =>
         format!("assert {}; {}", e1, e2),
@@ -33,27 +39,66 @@ pub ExprFunction: String = {
     ExprIf,
 };
 
-pub ExprIf: String = {
+FunctionArg: String = {
+    NonEmptyFunctionArg,
+    EmptyFormalsOrBinds,
+};
+
+NonEmptyFunctionArg: String = {
+    <s:FormalsOrBindsStart> "?" <e:Expr> "," <fs:Formals> "}" =>
+        format!("{} ? {}, {} }}", s, e, fs),
+
+    <s:FormalsOrBindsStart> "?" <e:Expr> "}" =>
+        format!("{} ? {} }}", s, e),
+
+    <s:FormalsOrBindsStart> "," <fs:Formals> "}" =>
+        format!("{}, {} }}", s, fs),
+
+    <s:FormalsOrBindsStart> "}" =>
+        format!("{} }}", s),
+};
+
+FormalsOrBindsStart: String = {
+    "{" <i:ID> => format!("{{ {}", i),
+};
+
+EmptyFormalsOrBinds: String = {
+    "{" "}" => format!("{{}}"),
+};
+
+Formals: String = {
+    <f:Formal> "," <fs:Formals> => format!("{}, {}", f, fs),
+    <f:Formal> => format!("{}", f),
+    => format!(""),
+    "..." => format!("..."),
+};
+
+Formal: String = {
+    <i:ID> => format!("{}", i),
+    <i:ID> "?" <e:Expr> => format!("{} ? {}", i, e),
+};
+
+ExprIf: String = {
     "if" <e1:Expr> "then" <e2:Expr> "else" <e3:Expr> =>
         format!("if {} then {} else {}", e1, e2, e3),
 
     ExprOp,
 };
 
-pub ExprOp: String = {
+ExprOp: String = {
     // TODO: copy expr_op from nix's parser.y and figure out how to do precedence in LALRPOP
 
     ExprApp,
 };
 
-pub ExprApp: String = {
+ExprApp: String = {
     <e1:ExprApp> <e2:ExprSelect> =>
         format!("({}) {}", e1, e2),
 
     ExprSelect,
 };
 
-pub ExprSelect: String = {
+ExprSelect: String = {
     // <e:ExprSimple> "." <a:AttrPath> =>
     //     format!("({}).{}", e, a),
 
@@ -71,7 +116,7 @@ pub ExprSelect: String = {
     ExprSimple,
 };
 
-pub ExprSimple: String = {
+ExprSimple: String = {
     <i:ID> => {
         if i == "__curPos" {
             // TODO: make a special Expr::Position node, like in Nix?
@@ -88,8 +133,9 @@ pub ExprSimple: String = {
 
     // "''" <IndentStringParts> "''" => unimplemented!("indent strings"),
 
-    // TODO: the rest of expr_simple from Nix's parser.y (paths)
-
+    <p:PATH> => format!("{}", p),
+    <p:HPATH> => format!("{}", p),
+    <p:SPATH> => format!("{}", p),
     <u:URI> => format!("{}", u),
 
     "(" <Expr> ")",
@@ -100,13 +146,29 @@ pub ExprSimple: String = {
     "rec" "{" <b:Binds> "}" =>
         format!("rec {{ {} }}", b),
 
-    "{" <b:Binds> "}" =>
-        format!("{{ {} }}", b),
+    <s:FormalsOrBindsStart> <b:BindContinue> <bs:Binds> "}" =>
+        format!("{} {}{} }}", s, b, bs),
+
+    "{" "inherit" <a:Attrs> ";" <b:Binds> "}" =>
+        format!("{{ inherit {}; {} }}", a, b),
+
+    "{" "inherit" "(" <e:Expr> ")" <a:Attrs> ";" <b:Binds> "}" =>
+        format!("{{ inherit ({}) {}; {} }}", e, a, b),
+
+    // empty binds
+    EmptyFormalsOrBinds,
+
+    // "{" <b:Binds> "}" =>
+    //     format!("{{ {} }}", b),
 
     "[" <ExprList> "]",
 };
 
-pub Binds: String = {
+BindContinue: String = {
+    "=" <e:Expr> ";" => format!("= {};", e),
+};
+
+Binds: String = {
     <b:Binds> <a:AttrPath> "=" <e:Expr> ";" =>
         format!("{} {} = {};", b, a, e),
 
@@ -119,13 +181,13 @@ pub Binds: String = {
     => format!(""),
 };
 
-pub Attrs: String = {
+Attrs: String = {
     <as_:Attrs> <a:Attr> => format!("{} {}", as_, a),
     <as_:Attrs> <a:StringAttr> => format!("{} {}", as_, a),
     => format!(""),
 };
 
-pub AttrPath: String = {
+AttrPath: String = {
     <p:AttrPath> "." <a:Attr> =>
         format!("{}.{}", p, a),
 
@@ -139,31 +201,19 @@ pub AttrPath: String = {
         format!("{}", a),
 };
 
-pub Attr: String = {
+Attr: String = {
     <i:ID> => format!("{}", i),
     "or" => format!("or"),
 };
 
-pub StringAttr: String = {
+StringAttr: String = {
     // "\"" <StringParts> "\"",
     "${" <Expr> "}",
 };
 
-pub ExprList: String = {
+ExprList: String = {
     <l:ExprList> <e:ExprSelect> => format!("{} {}", l, e),
     => format!(""),
-};
-
-pub Formals: String = {
-    <f:Formal> "," <fs:Formals> => format!("{}, {}", f, fs),
-    <f:Formal> => format!("{}", f),
-    => format!(""),
-    "..." => format!("..."),
-};
-
-pub Formal: String = {
-    <i:ID> => format!("{}", i),
-    <i:ID> "?" <e:Expr> => format!("{} ? {}", i, e),
 };
 
 match {
